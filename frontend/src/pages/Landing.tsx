@@ -3,6 +3,12 @@ import { motion } from 'framer-motion'
 import {
   ShieldCheck, Network, IndianRupee, Languages, ServerCog, GitBranch, ArrowRight, Crown,
 } from 'lucide-react'
+import { lazy, Suspense } from 'react'
+
+// Lazy: keeps three.js (~500 KB) out of the main bundle — only the landing pays for it
+const DottedSurface = lazy(() =>
+  import('@/components/ui/dotted-surface').then((m) => ({ default: m.DottedSurface })),
+)
 
 const PILLARS = [
   { icon: Network, title: 'Ontology-grounded autonomy', desc: 'Decisions are governed actions on a typed graph of your world — every one with preconditions, blast radius, rollback, and provenance.' },
@@ -43,8 +49,11 @@ export default function Landing() {
       </nav>
 
       {/* Hero */}
-      <header className="scanlines relative mx-auto max-w-6xl px-6 pt-16 pb-20 text-center">
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+      <header className="scanlines relative isolate mx-auto max-w-6xl px-6 pt-16 pb-20 text-center">
+        <Suspense fallback={null}>
+          <DottedSurface className="overflow-hidden [mask-image:radial-gradient(ellipse_70%_65%_at_50%_40%,black_45%,transparent_100%)]" />
+        </Suspense>
+        <motion.div className="relative" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           <p className="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 font-mono text-xs text-ink-2">
             <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
             The Security Decision OS for India&apos;s startup economy
