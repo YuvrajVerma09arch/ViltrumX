@@ -30,7 +30,13 @@ const TERMINAL_LINES = [
 
 export default function Landing() {
   return (
-    <div className="min-h-dvh bg-bg">
+    // no bg on this wrapper: an opaque background here would paint over the
+    // -z-10 canvas — the body's bg-bg (same color) shows through instead
+    <div className="min-h-dvh">
+      <Suspense fallback={null}>
+        <DottedSurface />
+      </Suspense>
+
       {/* Nav */}
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2.5">
@@ -49,10 +55,7 @@ export default function Landing() {
       </nav>
 
       {/* Hero */}
-      <header className="scanlines relative isolate mx-auto max-w-6xl px-6 pt-16 pb-20 text-center">
-        <Suspense fallback={null}>
-          <DottedSurface className="overflow-hidden [mask-image:radial-gradient(ellipse_70%_65%_at_50%_40%,black_45%,transparent_100%)]" />
-        </Suspense>
+      <header className="scanlines relative mx-auto max-w-6xl px-6 pt-16 pb-20 text-center">
         <motion.div className="relative" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           <p className="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 font-mono text-xs text-ink-2">
             <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
