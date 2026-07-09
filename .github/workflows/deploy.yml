@@ -1,0 +1,19 @@
+name: Deploy
+on:
+  workflow_run:
+    workflows: ["Build & Push Images"]
+    types: [completed]
+jobs:
+  deploy-staging:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - run: echo "pull latest images, docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d"
+  deploy-prod:
+    needs: deploy-staging
+    if: ${{ startsWith(github.event.workflow_run.head_branch, 'v') }}
+    runs-on: ubuntu-latest
+    environment: production   # manual approval gate configured in repo settings
+    steps:
+      - run: echo "trigger production rollout"

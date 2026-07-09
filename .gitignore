@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+
+# Env & secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Data stores (local volumes if mapped into repo)
+neo4j_data/
+postgres_data/
+qdrant_data/

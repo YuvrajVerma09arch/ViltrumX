@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Surfaces — dark terminal theme */
+  --color-bg: #0d1117;
+  --color-surface: #161b22;
+  --color-surface-2: #1c2432;
+  --color-border: #30363d;
+  --color-border-subtle: #21262d;
+
+  /* Ink */
+  --color-ink: #e6edf3;
+  --color-ink-2: #9ba7b4;
+  --color-ink-3: #6e7b8a;
+
+  /* Brand accent — tempered terminal green */
+  --color-accent: #3fb950;
+  --color-accent-bright: #56d364;
+  --color-accent-dim: #1c3427;
+
+  /* Semantic */
+  --color-info: #58a6ff;
+  --color-danger: #f85149;
+
+  /* Status palette (validated — reserved for state, never chart series) */
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-serious: #ec835a;
+  --color-status-critical: #d03b3b;
+
+  /* Categorical chart series (validated on #161b22, fixed order — never cycled) */
+  --color-series-1: #3987e5;
+  --color-series-2: #199e70;
+  --color-series-3: #c98500;
+  --color-series-4: #9085e9;
+  --color-series-5: #e66767;
+
+  /* Chart chrome */
+  --color-grid: #21262d;
+  --color-axis: #383f47;
+}
+
+html {
+  scrollbar-color: #30363d #0d1117;
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+}
+
+@layer utilities {
+  .font-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Focus visibility for keyboard nav */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subtle scanline wash on the landing hero only */
+.scanlines::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 3px,
+    rgba(255, 255, 255, 0.012) 3px,
+    rgba(255, 255, 255, 0.012) 4px
+  );
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+@keyframes feed-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.feed-in { animation: feed-in 240ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot, .feed-in { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
