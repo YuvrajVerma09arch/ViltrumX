@@ -42,8 +42,8 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     const colors: number[] = []
     const geometry = new THREE.BufferGeometry()
 
-    // ink-3 (#6e7b8a) dots, fading into the fog
-    const dot = new THREE.Color(0x6e7b8a)
+    // accent-green dots (brand match), fading into the fog with distance
+    const dot = new THREE.Color(0x3fb950)
     for (let ix = 0; ix < AMOUNTX; ix++) {
       for (let iy = 0; iy < AMOUNTY; iy++) {
         positions.push(

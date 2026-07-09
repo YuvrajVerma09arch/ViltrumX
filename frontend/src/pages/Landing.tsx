@@ -1,13 +1,21 @@
-import { Link } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   ShieldCheck, Network, IndianRupee, Languages, ServerCog, GitBranch, ArrowRight, Crown,
 } from 'lucide-react'
-import { lazy, Suspense } from 'react'
+import { Card } from '@/components/ui/card'
+import { Spotlight } from '@/components/ui/spotlight'
+import { CursorSpotlight } from '@/components/ui/cursor-spotlight'
+import { SplineScene } from '@/components/ui/splite'
+import { LiquidButton } from '@/components/ui/liquid-glass-button'
 
-// Lazy: keeps three.js (~500 KB) out of the main bundle — only the landing pays for it
+// three.js-based backdrops stay out of the main bundle — only the landing pays
 const DottedSurface = lazy(() =>
   import('@/components/ui/dotted-surface').then((m) => ({ default: m.DottedSurface })),
+)
+const WebGLShader = lazy(() =>
+  import('@/components/ui/web-gl-shader').then((m) => ({ default: m.WebGLShader })),
 )
 
 const PILLARS = [
@@ -29,10 +37,11 @@ const TERMINAL_LINES = [
 ]
 
 export default function Landing() {
+  const navigate = useNavigate()
+
   return (
-    // no bg on this wrapper: an opaque background here would paint over the
-    // -z-10 canvas — the body's bg-bg (same color) shows through instead
     <div className="min-h-dvh">
+      {/* Fixed page backdrop — sits at -z-10, above the html background */}
       <Suspense fallback={null}>
         <DottedSurface />
       </Suspense>
@@ -54,37 +63,74 @@ export default function Landing() {
         </div>
       </nav>
 
-      {/* Hero */}
-      <header className="scanlines relative mx-auto max-w-6xl px-6 pt-16 pb-20 text-center">
-        <motion.div className="relative" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-          <p className="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 font-mono text-xs text-ink-2">
-            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
-            The Security Decision OS for India&apos;s startup economy
-          </p>
-          <h1 className="mx-auto max-w-3xl font-mono text-4xl leading-tight font-bold tracking-tight md:text-5xl">
-            Most tools display alerts.
-            <br />
-            <span className="text-accent">ViltrumX makes governed decisions.</span>
-          </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-ink-2">
-            An autonomous SOC that models your startup as a living digital twin, neutralizes threats
-            with auditable, reversible actions — and explains every decision in your language, in rupees.
-          </p>
-          <div className="mt-8 flex items-center justify-center gap-3">
-            <Link to="/login" className="inline-flex items-center gap-2 rounded-md bg-accent px-6 py-3 font-semibold text-bg transition-colors hover:bg-accent-bright">
-              Onboard in 10 minutes <ArrowRight size={16} aria-hidden />
-            </Link>
-            <Link to="/app" className="rounded-md border border-border px-6 py-3 font-medium text-ink-2 transition-colors hover:border-ink-3 hover:text-ink">
-              View live demo
-            </Link>
-          </div>
-        </motion.div>
+      {/* Hero — spotlight card with Spline robot */}
+      <header className="mx-auto max-w-6xl px-6 pt-6">
+        <Card className="relative h-auto overflow-hidden bg-surface/70 backdrop-blur md:h-[560px]">
+          <Spotlight className="-top-40 left-0 md:-top-20 md:left-60" fill="#3fb950" />
+          <div className="flex h-full flex-col md:flex-row">
+            {/* Left: copy */}
+            <motion.div
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}
+              className="relative z-10 flex flex-1 flex-col justify-center p-8 md:p-12"
+            >
+              <p className="mb-5 inline-flex w-fit items-center gap-2 rounded-full border border-border bg-bg/70 px-3 py-1 font-mono text-xs text-ink-2">
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+                The Security Decision OS for India&apos;s startup economy
+              </p>
+              <h1 className="font-mono text-4xl leading-tight font-bold tracking-tight md:text-5xl">
+                <span className="bg-gradient-to-b from-ink to-ink-3 bg-clip-text text-transparent">
+                  Most tools display alerts.
+                </span>
+                <br />
+                <span className="text-accent">ViltrumX makes governed decisions.</span>
+              </h1>
+              <p className="mt-5 max-w-lg text-lg text-ink-2">
+                An autonomous SOC that models your startup as a living digital twin, neutralizes
+                threats with auditable, reversible actions — and explains every decision in your
+                language, in rupees.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-4">
+                <Link
+                  to="/login"
+                  className="inline-flex h-12 items-center gap-2 rounded-full bg-accent px-7 font-semibold text-bg transition-colors hover:bg-accent-bright"
+                >
+                  Onboard in 10 minutes <ArrowRight size={16} aria-hidden />
+                </Link>
+                <LiquidButton
+                  size="xl"
+                  className="rounded-full border border-border font-semibold text-ink"
+                  onClick={() => navigate('/app')}
+                >
+                  View live demo
+                </LiquidButton>
+              </div>
+              <div className="mt-8 flex items-center gap-2">
+                <span className="relative flex h-3 w-3 items-center justify-center" aria-hidden>
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
+                </span>
+                <p className="font-mono text-xs text-accent-bright">8/8 agents nominal · demo tenant live now</p>
+              </div>
+            </motion.div>
 
-        {/* Terminal window */}
+            {/* Right: 3D scene (streams from prod.spline.design — needs network) */}
+            <div className="relative hidden min-h-[560px] flex-1 md:block">
+              <SplineScene
+                scene="https://prod.spline.design/kZDDjO5HuC9GJUM2/scene.splinecode"
+                className="h-full w-full"
+              />
+            </div>
+          </div>
+        </Card>
+      </header>
+
+      {/* Terminal — last night, while you slept */}
+      <section className="scanlines relative mx-auto max-w-6xl px-6 py-16">
         <motion.div
-          initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.15 }}
-          className="mx-auto mt-14 max-w-3xl overflow-hidden rounded-xl border border-border bg-surface text-left shadow-2xl"
+          initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.5 }}
+          className="relative mx-auto max-w-3xl overflow-hidden rounded-xl border border-border bg-surface shadow-2xl"
         >
+          <CursorSpotlight size={340} />
           <div className="flex items-center gap-1.5 border-b border-border-subtle px-4 py-2.5">
             <span className="h-2.5 w-2.5 rounded-full bg-status-critical/70" aria-hidden />
             <span className="h-2.5 w-2.5 rounded-full bg-status-warning/70" aria-hidden />
@@ -95,7 +141,7 @@ export default function Landing() {
             {TERMINAL_LINES.map((l, i) => (
               <motion.div
                 key={l.t}
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 + i * 0.18 }}
+                initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 0.2 + i * 0.15 }}
                 className="flex gap-3"
               >
                 <span className="text-ink-3">{l.t}</span>
@@ -105,12 +151,15 @@ export default function Landing() {
                 <span className="text-ink">{l.m}</span>
               </motion.div>
             ))}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.6 }} className="pt-1 text-accent">
+            <motion.div
+              initial={{ opacity: 0 }} whileInView={{ opacity: 1 }} viewport={{ once: true }} transition={{ delay: 1.3 }}
+              className="pt-1 text-accent"
+            >
               ▌ zero records exfiltrated · founder informed in हिंदी
             </motion.div>
           </div>
         </motion.div>
-      </header>
+      </section>
 
       {/* Metric strip */}
       <section className="border-y border-border bg-surface/50">
@@ -171,21 +220,37 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* CTA + footer */}
-      <footer className="mx-auto max-w-6xl px-6 py-20 text-center">
-        <h2 className="font-mono text-3xl font-bold">
-          Grounded in your world. Proven every night.
-          <br /><span className="text-accent">Understood in your language.</span>
-        </h2>
-        <Link to="/login" className="mt-8 inline-flex items-center gap-2 rounded-md bg-accent px-8 py-3.5 font-semibold text-bg transition-colors hover:bg-accent-bright">
-          Start free — ₹0 for 14 days <ArrowRight size={16} aria-hidden />
-        </Link>
-        <div className="mt-14 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 border-t border-border-subtle pt-8 font-mono text-xs text-ink-3">
-          <span>© 2026 ViltrumX</span>
-          <span>Made in India 🇮🇳</span>
-          <span>DPDP-ready · CERT-In-aware · data stays in ap-south-1</span>
-          <span className="inline-flex items-center gap-1"><ServerCog size={12} aria-hidden /> sovereign self-hosted inference available</span>
+      {/* CTA — neon shader banner */}
+      <section className="relative overflow-hidden border-t border-border">
+        <Suspense fallback={null}>
+          <WebGLShader />
+        </Suspense>
+        <div className="relative z-10 mx-auto max-w-6xl px-6 py-28 text-center">
+          <h2 className="font-mono text-3xl font-bold md:text-4xl">
+            Grounded in your world. Proven every night.
+            <br /><span className="text-accent">Understood in your language.</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-xl text-ink-2">
+            Self-serve onboarding, INR pricing, and a defense readiness score you can show your board.
+          </p>
+          <div className="mt-9 flex justify-center">
+            <LiquidButton
+              size="xl"
+              className="rounded-full border border-accent/40 font-semibold text-accent-bright"
+              onClick={() => navigate('/login')}
+            >
+              Start free — ₹0 for 14 days
+            </LiquidButton>
+          </div>
         </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-6 gap-y-2 px-6 py-10 font-mono text-xs text-ink-3">
+        <span>© 2026 ViltrumX</span>
+        <span>Made in India 🇮🇳</span>
+        <span>DPDP-ready · CERT-In-aware · data stays in ap-south-1</span>
+        <span className="inline-flex items-center gap-1"><ServerCog size={12} aria-hidden /> sovereign self-hosted inference available</span>
       </footer>
     </div>
   )

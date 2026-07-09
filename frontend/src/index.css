@@ -41,14 +41,47 @@
   /* Chart chrome */
   --color-grid: #21262d;
   --color-axis: #383f47;
+
+  /* shadcn-compatible aliases — any shadcn-ecosystem snippet color-matches ViltrumX */
+  --color-background: #0d1117;
+  --color-foreground: #e6edf3;
+  --color-card: #161b22;
+  --color-card-foreground: #e6edf3;
+  --color-muted: #21262d;
+  --color-muted-foreground: #9ba7b4;
+  --color-primary: #3fb950;
+  --color-primary-foreground: #0d1117;
+  --color-secondary: #1c2432;
+  --color-secondary-foreground: #e6edf3;
+  --color-accent-foreground: #0d1117;
+  --color-destructive: #f85149;
+  --color-input: #30363d;
+  --color-ring: #3fb950;
+
+  --animate-spotlight: spotlight 2s ease 0.75s 1 forwards;
 }
 
+@keyframes spotlight {
+  0% {
+    opacity: 0;
+    transform: translate(-72%, -62%) scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -40%) scale(1);
+  }
+}
+
+/* The page color lives on <html> so it paints the root canvas, BELOW
+   negative-z-index layers. An opaque body background would paint ABOVE
+   fixed -z-10 canvases (DottedSurface/WebGLShader) and hide them. */
 html {
+  background: #0d1117;
   scrollbar-color: #30363d #0d1117;
 }
 
 body {
-  @apply bg-bg text-ink font-sans antialiased;
+  @apply text-ink font-sans antialiased;
 }
 
 @layer utilities {
