@@ -9,7 +9,9 @@ attack surface and zero analysts, and understood in the founder's own language.
 > *Most tools display alerts. ViltrumX makes governed decisions — grounded in your world,
 > proven every night, understood in your language.*
 
-Full product spec: [`CLAUDE.md`](./CLAUDE.md).
+Full product spec: [`CLAUDE.md`](./CLAUDE.md) · System design:
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · Build roadmap:
+[`docs/BUILD-PLAN.md`](./docs/BUILD-PLAN.md).
 
 ## Repository layout
 

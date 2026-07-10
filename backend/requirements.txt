@@ -22,9 +22,13 @@ hdbscan>=0.8.38
 sentence-transformers>=3.0
 joblib>=1.4
 
-# Agents / explanation layer
+# Agents / explanation layer (provider-agnostic: Groq default, Ollama sovereign)
 langgraph>=0.2
-langchain-anthropic>=0.2
+langchain-groq>=0.2
+langchain-ollama>=0.2
+
+# Auth
+djangorestframework-simplejwt>=5.3
 
 # Quality / CI
 ruff>=0.6
