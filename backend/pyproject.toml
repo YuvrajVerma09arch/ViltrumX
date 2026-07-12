@@ -1,0 +1,19 @@
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "viltrumx.settings.test"
+python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv", "*/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "DJ"]
+
+[tool.ruff.lint.per-file-ignores]
+# fixture transliterations of mock.ts — long literal rows are the point
+"core/demo_data.py" = ["E501"]
+"reports/demo_narratives.py" = ["E501"]
+
+[tool.coverage.run]
+omit = ["*/migrations/*", "*/tests/*", "manage.py"]

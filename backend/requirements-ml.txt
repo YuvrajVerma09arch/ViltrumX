@@ -1,0 +1,16 @@
+# Week 3+ intelligence plane — install when you start detection/agents work:
+#   pip install -r requirements-ml.txt
+# Kept out of requirements.txt so CI and the docker image stay fast/small
+# until these are actually imported.
+
+scikit-learn>=1.5
+xgboost>=2.1
+lightgbm>=4.5
+hdbscan>=0.8.38
+sentence-transformers>=3.0
+qdrant-client>=1.11
+
+# Agents / explanation layer (provider-agnostic: Groq default, Ollama sovereign)
+langgraph>=0.2
+langchain-groq>=0.2
+langchain-ollama>=0.2

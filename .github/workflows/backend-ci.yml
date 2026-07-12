@@ -8,34 +8,39 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Postgres/Redis service containers get enabled together with the test
-    # steps below once the Django project lands in backend/.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: viltrumx_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/viltrumx_test
     steps:
       - uses: actions/checkout@v4
-      - name: Detect Django project
-        id: django
-        run: echo "exists=$([ -f backend/manage.py ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - name: Backend not implemented yet
-        if: steps.django.outputs.exists == 'false'
-        run: echo "backend/manage.py not found — skipping test suite until Django lands"
       - uses: actions/setup-python@v5
-        if: steps.django.outputs.exists == 'true'
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
       - name: Install dependencies
-        if: steps.django.outputs.exists == 'true'
         run: pip install -r backend/requirements.txt
       - name: Lint (ruff)
-        if: steps.django.outputs.exists == 'true'
         run: ruff check backend/
       - name: Security scan (bandit)
-        if: steps.django.outputs.exists == 'true'
-        run: bandit -r backend/ -ll
+        run: bandit -r backend/ -ll -x backend/.venv
       - name: Migration check
-        if: steps.django.outputs.exists == 'true'
-        run: python backend/manage.py migrate --check
-        env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/viltrumx_test
+        working-directory: backend
+        run: |
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate
       - name: Tests
-        if: steps.django.outputs.exists == 'true'
-        run: pytest backend/ --cov=backend --cov-report=xml
+        working-directory: backend
+        run: pytest . --cov=. --cov-report=xml

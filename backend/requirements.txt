@@ -1,36 +1,26 @@
-# Core
-Django>=5.0,<6.0
+# ViltrumX backend — core runtime (installed by CI on every push).
+# Heavy ML/agent deps live in requirements-ml.txt (Week 3, installed on demand).
+
+# Web framework
+Django>=5.1,<6
 djangorestframework>=3.15
-django-cors-headers>=4.3
-channels[daphne]>=4.1
+djangorestframework-simplejwt>=5.3
+django-cors-headers>=4.4
+
+# Config / DB
+dj-database-url>=2.2
+psycopg[binary]>=3.2
+
+# Async jobs + realtime
 celery[redis]>=5.4
 redis>=5.0
-psycopg[binary]>=3.2
-dj-database-url>=2.2
+channels>=4.1
+channels-redis>=4.2
 
-# Ontology / graph
+# Graph (Week 2)
 neo4j>=5.23
 
-# Vector memory
-qdrant-client>=1.11
-
-# ML (detection is ML; LLMs only explain — CLAUDE.md §6)
-scikit-learn>=1.5
-xgboost>=2.1
-lightgbm>=4.5
-hdbscan>=0.8.38
-sentence-transformers>=3.0
-joblib>=1.4
-
-# Agents / explanation layer (provider-agnostic: Groq default, Ollama sovereign)
-langgraph>=0.2
-langchain-groq>=0.2
-langchain-ollama>=0.2
-
-# Auth
-djangorestframework-simplejwt>=5.3
-
-# Quality / CI
+# Dev / CI quality gates
 ruff>=0.6
 bandit>=1.7
 pytest>=8.3
