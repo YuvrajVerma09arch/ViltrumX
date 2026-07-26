@@ -28,3 +28,8 @@ htmlcov/
 neo4j_data/
 postgres_data/
 qdrant_data/
+
+output/
+generate_pptx.py
+VILTRUMX_VIVA.pptx
+VIVA.md
