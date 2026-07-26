@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react'
 import { ReactFlow, Background, Controls, MiniMap, Handle, Position, type Node, type Edge, type NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { User, Bot, KeyRound, Laptop, Cloud, GitBranch, Grid2x2, Database, X } from 'lucide-react'
-import { PageHeader, Card, Badge, CriticalityBadge } from '../components/ui'
-import { ONT_NODES, ONT_EDGES, type OntNode, type OntNodeType } from '../data/mock'
+import { PageHeader, Card, Badge, CriticalityBadge, DataSource } from '../components/ui'
+import { ONT_NODES, ONT_EDGES, type OntNode, type OntEdge, type OntNodeType } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { cn } from '../lib/utils'
 
 /** Entity-class colors (validated categorical slots — identity also carried by icon + label). */
@@ -49,19 +51,28 @@ function EntityNode({ data, selected }: NodeProps<FlowNode>) {
 
 const nodeTypes = { entity: EntityNode }
 
+type Graph = { nodes: OntNode[]; edges: OntEdge[] }
+
 export default function OntologyExplorer() {
   const [selected, setSelected] = useState<OntNode | null>(null)
   const [attackOnly, setAttackOnly] = useState(false)
 
+  const graph = useApi<Graph>(
+    () => endpoints.ontologyGraph(),
+    { nodes: ONT_NODES, edges: ONT_EDGES },
+  )
+  const ontNodes = graph.data.nodes
+  const ontEdges = graph.data.edges
+
   const nodes: FlowNode[] = useMemo(
-    () => ONT_NODES
-      .filter((n) => !attackOnly || n.compromised || ONT_EDGES.some((e) => e.attack && (e.source === n.id || e.target === n.id)))
+    () => ontNodes
+      .filter((n) => !attackOnly || n.compromised || ontEdges.some((e) => e.attack && (e.source === n.id || e.target === n.id)))
       .map((n) => ({ id: n.id, type: 'entity', position: { x: n.x, y: n.y }, data: { ont: n } })),
-    [attackOnly],
+    [attackOnly, ontNodes, ontEdges],
   )
 
   const edges: Edge[] = useMemo(
-    () => ONT_EDGES
+    () => ontEdges
       .filter((e) => !attackOnly || e.attack)
       .map((e) => ({
         id: e.id,
@@ -73,15 +84,16 @@ export default function OntologyExplorer() {
         labelStyle: { fill: e.attack ? '#e66767' : '#6e7b8a', fontFamily: 'JetBrains Mono', fontSize: 9 },
         labelBgStyle: { fill: '#0d1117', fillOpacity: 0.85 },
       })),
-    [attackOnly],
+    [attackOnly, ontEdges],
   )
 
   return (
     <div>
       <PageHeader
         title="Ontology Explorer"
-        subtitle="PayKraft's world as a typed graph — 16 objects, 15 links, synced from Workspace, GitHub, and CloudTrail 41 seconds ago."
+        subtitle={`PayKraft's world as a typed graph — ${ontNodes.length} objects, ${ontEdges.length} links, synced from Workspace, GitHub, and CloudTrail.`}
       >
+        <DataSource live={graph.live} loading={graph.loading} />
         <button
           onClick={() => setAttackOnly(!attackOnly)}
           className={cn(
@@ -148,9 +160,9 @@ export default function OntologyExplorer() {
             <div className="mt-4 border-t border-border-subtle pt-3">
               <div className="font-mono text-[10px] font-semibold tracking-widest text-ink-3 uppercase">Links</div>
               <ul className="mt-2 space-y-1.5 font-mono text-xs text-ink-2">
-                {ONT_EDGES.filter((e) => e.source === selected.id || e.target === selected.id).map((e) => {
+                {ontEdges.filter((e) => e.source === selected.id || e.target === selected.id).map((e) => {
                   const otherId = e.source === selected.id ? e.target : e.source
-                  const other = ONT_NODES.find((n) => n.id === otherId)
+                  const other = ontNodes.find((n) => n.id === otherId)
                   return (
                     <li key={e.id} className={cn(e.attack && 'text-danger')}>
                       {e.source === selected.id ? '→' : '←'} {e.label} · {other?.label}

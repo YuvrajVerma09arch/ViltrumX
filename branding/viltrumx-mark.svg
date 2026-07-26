@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ViltrumX mark — hexagon ontology graph enclosing a governed shield">
+  <defs>
+    <linearGradient id="vx-hex" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#56d364"/>
+      <stop offset="1" stop-color="#2ea043"/>
+    </linearGradient>
+    <linearGradient id="vx-shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2432"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <filter id="vx-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+
+  <!-- hexagon = the ontology: six nodes joined by six edges -->
+  <path d="M256 64 L422 160 V352 L256 448 L90 352 V160 Z"
+        fill="none" stroke="url(#vx-hex)" stroke-width="16" stroke-linejoin="round"/>
+
+  <!-- shield = governed protection -->
+  <path d="M256 150 L352 190 V254 C352 314 312 358 256 374 C200 358 160 314 160 254 V190 Z"
+        fill="url(#vx-shield)" stroke="#3fb950" stroke-width="10" stroke-linejoin="round"/>
+
+  <!-- V = Viltrum / verified (phosphor glow underlay) -->
+  <path d="M212 222 L256 306 L300 222" fill="none" stroke="#56d364" stroke-width="22"
+        stroke-linecap="round" stroke-linejoin="round" filter="url(#vx-glow)" opacity="0.45"/>
+  <path d="M212 222 L256 306 L300 222" fill="none" stroke="#56d364" stroke-width="20"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- graph nodes at the hexagon vertices -->
+  <g fill="#0d1117" stroke="url(#vx-hex)" stroke-width="6">
+    <circle cx="256" cy="64" r="13"/>
+    <circle cx="422" cy="160" r="13"/>
+    <circle cx="422" cy="352" r="13"/>
+    <circle cx="256" cy="448" r="13"/>
+    <circle cx="90" cy="352" r="13"/>
+    <circle cx="90" cy="160" r="13"/>
+  </g>
+</svg>

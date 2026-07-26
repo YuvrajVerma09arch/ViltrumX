@@ -1,8 +1,17 @@
-import { useState } from 'react'
-import { ShieldQuestion, Crown } from 'lucide-react'
-import { PageHeader, Card, Segmented, AutonomyBadge, Badge } from '../components/ui'
+import { useEffect, useState } from 'react'
+import { ShieldQuestion, Crown, Save, Loader2 } from 'lucide-react'
+import { PageHeader, Card, Segmented, AutonomyBadge, Badge, Button, DataSource } from '../components/ui'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { AUTONOMY_LABELS, type AutonomyLevel } from '../lib/utils'
 import { cn } from '../lib/utils'
+
+/** Wire shape of a policy row as the API serves it. */
+type PolicyRow = {
+  actionType: string
+  level: AutonomyLevel
+  crownJewelOverride: AutonomyLevel
+}
 
 type Policy = {
   action: string
@@ -32,11 +41,57 @@ const LADDER: { level: AutonomyLevel; desc: string; reversibility: string }[] = 
   { level: 'L4', desc: 'High blast radius. The system proposes; a human approves.', reversibility: 'Human-gated' },
 ]
 
+const DESCRIPTIONS = Object.fromEntries(INITIAL.map((p) => [p.action, p]))
+
 export default function AutonomyConsole() {
+  const remote = useApi<PolicyRow[]>(() => endpoints.policies(), [])
   const [policies, setPolicies] = useState(INITIAL)
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [notice, setNotice] = useState('')
+
+  // Merge the server's dial with our local copy for the human-readable
+  // description and blast-radius column, which the API doesn't carry.
+  useEffect(() => {
+    if (!remote.data.length) return
+    setPolicies(
+      remote.data.map((row) => ({
+        action: row.actionType,
+        desc: DESCRIPTIONS[row.actionType]?.desc ?? '',
+        blast: DESCRIPTIONS[row.actionType]?.blast ?? 'medium',
+        level: row.level,
+        crownOverride: row.crownJewelOverride,
+      })),
+    )
+    setDirty(false)
+  }, [remote.data])
 
   function set(i: number, key: 'level' | 'crownOverride', v: AutonomyLevel) {
     setPolicies(policies.map((p, idx) => (idx === i ? { ...p, [key]: v } : p)))
+    setDirty(true)
+    setNotice('')
+  }
+
+  // Saving writes a NEW immutable policy version — the dial is an auditable
+  // object, so past decisions always resolve against the version in force.
+  async function save() {
+    setSaving(true)
+    try {
+      await endpoints.savePolicies(
+        policies.map((p) => ({
+          actionType: p.action,
+          level: p.level,
+          crownJewelOverride: p.crownOverride,
+        })),
+      )
+      setNotice('Saved — a new policy version is now in force.')
+      setDirty(false)
+      remote.reload()
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not save the dial.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -45,7 +100,14 @@ export default function AutonomyConsole() {
         title="Autonomy Console"
         subtitle="The governed-autonomy dial — per action type, per criticality. The policy itself is an object in the ontology, versioned and auditable."
       >
-        <Badge tone="green">POLICY v14 · ACTIVE</Badge>
+        <div className="flex items-center gap-2">
+          <DataSource live={remote.live} loading={remote.loading} />
+          <Badge tone="green">{remote.data.length ? 'POLICY ACTIVE' : 'DEFAULTS'}</Badge>
+          <Button size="sm" onClick={save} disabled={!dirty || saving}>
+            {saving ? <Loader2 size={13} className="animate-spin" aria-hidden /> : <Save size={13} aria-hidden />}
+            {dirty ? 'Save new version' : 'Saved'}
+          </Button>
+        </div>
       </PageHeader>
 
       {/* Ladder explainer */}
@@ -58,6 +120,10 @@ export default function AutonomyConsole() {
           </div>
         ))}
       </div>
+
+      {notice && (
+        <p className="mt-4 rounded-md border border-info/30 bg-info/10 px-3 py-2.5 text-sm text-info">{notice}</p>
+      )}
 
       {/* Policy matrix */}
       <Card title="Action policy matrix — PayKraft defaults" className="mt-4" padded={false}>

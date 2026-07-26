@@ -11,6 +11,26 @@ import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
+
+def _load_dotenv(path: Path) -> None:
+    """Read the repo-root .env into os.environ for local (non-container) runs.
+
+    Docker Compose injects these via `env_file:`, so this is a no-op there.
+    Uses setdefault so real environment variables always win — a production
+    secrets manager is never overridden by a stray .env on disk.
+    """
+    if not path.is_file():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_dotenv(BASE_DIR.parent / ".env")
+
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key")  # noqa: S105
 DEBUG = False
 ALLOWED_HOSTS: list[str] = []
@@ -91,7 +111,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ── DRF + JWT ────────────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
+    # Order matters: ServiceTokenAuthentication must come FIRST. Both classes
+    # claim the "Bearer" scheme, but JWTAuthentication *raises* on a token it
+    # cannot decode, which aborts the whole chain — so if it ran first the
+    # orchestrator's service token would never be reached (401). The service
+    # class returns None on a non-match, letting JWT run for human callers.
     "DEFAULT_AUTHENTICATION_CLASSES": (
+        "core.service_auth.ServiceTokenAuthentication",
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
@@ -119,6 +145,14 @@ QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq")  # "groq" | "ollama"
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+
+# ── Django Channels (WebSocket live feed) ────────────────────────────────────
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": [REDIS_URL]},
+    }
+}
 
 # ── Internal service token (orchestrator → Django API, Week 3) ──────────────
 ORCHESTRATOR_SERVICE_TOKEN = os.environ.get("ORCHESTRATOR_SERVICE_TOKEN", "")

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { UserPlus, Check } from 'lucide-react'
 import { PageHeader, Card, Table, Td, Badge, Button, Segmented, Toggle } from '../components/ui'
 import { MEMBERS, INVOICES } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { cn } from '../lib/utils'
 
 type Tab = 'team' | 'tenant' | 'billing'
@@ -17,6 +19,9 @@ const PLANS = [
 ]
 
 export default function Settings() {
+  const members = useApi<typeof MEMBERS>(() => endpoints.members(), MEMBERS)
+  const invoices = useApi<typeof INVOICES>(() => endpoints.invoices(), INVOICES)
+
   const [tab, setTab] = useState<Tab>('team')
   const [whatsapp, setWhatsapp] = useState(true)
   const [hindiDigest, setHindiDigest] = useState(true)
@@ -35,10 +40,14 @@ export default function Settings() {
       {tab === 'team' && (
         <div className="grid gap-4 xl:grid-cols-3">
           <Card title="Members" className="xl:col-span-2" padded={false}
-            action={<Button size="sm" variant="outline"><UserPlus size={13} aria-hidden /> Invite</Button>}
+            action={
+              <Button size="sm" variant="outline" disabled title="Invitations ship with SSO — roadmap, not in this build">
+                <UserPlus size={13} aria-hidden /> Invite
+              </Button>
+            }
           >
             <Table head={['Member', 'Role', 'Last active']}>
-              {MEMBERS.map((m) => (
+              {members.data.map((m) => (
                 <tr key={m.email} className="hover:bg-surface-2/50">
                   <Td>
                     <div className="text-sm font-medium">{m.name}</div>
@@ -129,13 +138,17 @@ export default function Settings() {
                 </div>
                 <div className="font-data mt-3 text-2xl font-bold">{p.price}<span className="text-sm font-normal text-ink-3">{p.per}</span></div>
                 <p className="mt-2.5 text-xs leading-relaxed text-ink-2">{p.pitch}</p>
-                {!p.current && <Button size="sm" variant="outline" className="mt-4">Switch plan</Button>}
+                {!p.current && (
+                  <Button size="sm" variant="outline" className="mt-4" disabled title="Razorpay checkout is roadmap — billing is fixture-tier in this build">
+                    Switch plan
+                  </Button>
+                )}
               </div>
             ))}
           </div>
           <Card title="Invoices — GST · UPI autopay via Razorpay" padded={false}>
             <Table head={['Invoice', 'Period', 'Amount', 'Tax', 'Status']}>
-              {INVOICES.map((inv) => (
+              {invoices.data.map((inv) => (
                 <tr key={inv.id} className="hover:bg-surface-2/50">
                   <Td className="font-mono text-xs">{inv.id}</Td>
                   <Td className="text-sm">{inv.period}</Td>

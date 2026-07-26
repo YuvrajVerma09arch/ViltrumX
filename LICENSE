@@ -1,0 +1,139 @@
+VILTRUMX PROPRIETARY LICENSE
+Version 1.0 — 15 July 2026
+
+Copyright (c) 2026 Yuvraj ("the Owner"). All Rights Reserved.
+
+PREAMBLE
+
+ViltrumX — including its concept, product vision, architecture, ontology
+model, agent designs, governance model, documentation, brand identity, and
+source code — is the original work and exclusive property of the Owner.
+This repository is made available to specific, authorized collaborators and
+academic evaluators only. It is NOT open source. No rights are granted
+except those explicitly stated below.
+
+1. DEFINITIONS
+
+  1.1 "Project" means the ViltrumX software and every artifact in this
+      repository, including source code, documentation, specifications,
+      designs, diagrams, data models, and brand assets (including the
+      hexagon-shield mark).
+
+  1.2 "Concept" means the underlying idea and design of ViltrumX as
+      expressed in the Project — including its product vision and
+      positioning, the ontology-driven security operations model, the
+      governed-autonomy ladder, the agent roster and orchestration design,
+      the India-first compliance approach, the multilingual explainability
+      approach, Founder Mode, and the brand identity.
+
+  1.3 "Owner" means Yuvraj, the sole and exclusive owner of the Project
+      and the Concept.
+
+  1.4 "Contributor" means any person other than the Owner who submits,
+      or has submitted, any code, documentation, design, or other material
+      to the Project.
+
+  1.5 "Contribution" means any material submitted to the Project by a
+      Contributor.
+
+2. OWNERSHIP
+
+  2.1 The Project and the Concept are, and shall remain, the sole and
+      exclusive property of the Owner.
+
+  2.2 No Contributor, collaborator, evaluator, or other party acquires any
+      ownership right, title, or interest in the Project or the Concept by
+      contributing to it, accessing it, evaluating it, grading it, or by
+      any other means. Contribution of code does not create co-ownership,
+      partnership, or joint authorship of the Project or the Concept.
+
+  2.3 Authorship is not ownership. Contributors are entitled to attribution
+      for the specific work they authored (Section 4.3), but attribution
+      creates no right, title, or interest in the Project or the Concept.
+
+3. RESTRICTIONS
+
+  Except as expressly permitted in Section 4, no person may, without the
+  prior written permission of the Owner:
+
+  (a) copy, reproduce, publish, distribute, sublicense, sell, or otherwise
+      make available the Project or any part of it;
+  (b) modify the Project or create derivative works based on it;
+  (c) use the Project or the Concept, in whole or in part, to build,
+      pitch, market, or commercialize any product or service, including
+      any competing or substantially similar product;
+  (d) present or represent the Project or the Concept as their own work in
+      any academic, commercial, employment, or investment context;
+  (e) use the "ViltrumX" name, the hexagon-shield mark, or any confusingly
+      similar name or mark;
+  (f) remove or alter any copyright, license, or attribution notice.
+
+4. LIMITED PERMISSIONS
+
+  4.1 Academic evaluation. Examiners and academic evaluators may view the
+      Project and run it locally solely for the purpose of assessing it.
+
+  4.2 Authorized collaboration. Contributors expressly authorized by the
+      Owner may access and modify the Project solely for the purpose of
+      contributing work back to this repository.
+
+  4.3 Attribution. Contributors retain the right to be identified as the
+      author of the specific commits and files they wrote (for example,
+      via version-control history), and may reference their contribution
+      in a portfolio, CV, or interview, provided that any such reference
+      clearly states that the Project and the Concept belong to the Owner.
+
+5. CONTRIBUTIONS
+
+  5.1 By submitting a Contribution, each Contributor irrevocably assigns to
+      the Owner all right, title, and interest in and to that Contribution,
+      including all intellectual-property rights, to the fullest extent
+      permitted by applicable law. To the extent such assignment is not
+      effective under applicable law, the Contributor grants the Owner an
+      exclusive, perpetual, irrevocable, worldwide, royalty-free,
+      transferable, and sublicensable license to use, reproduce, modify,
+      distribute, and commercialize the Contribution for any purpose.
+
+  5.2 Each Contributor represents and warrants that their Contribution is
+      their own original work and is not subject to any third-party rights
+      or license obligations that would conflict with this License.
+
+  5.3 No compensation, royalty, equity, or ownership interest is owed to
+      any Contributor for any Contribution unless separately agreed by the
+      Owner in a signed written agreement.
+
+6. TRADEMARK AND BRAND
+
+  The name "ViltrumX", the hexagon-shield mark, and the associated brand
+  assets in the branding/ directory identify the Owner's project and may
+  not be used by any other party without the Owner's prior written
+  permission.
+
+7. TERMINATION
+
+  Any rights granted under Section 4 terminate automatically and
+  immediately upon any breach of this License. Upon termination, the
+  breaching party must cease all use of the Project and destroy all copies
+  in their possession or control.
+
+8. NO WARRANTY
+
+  THE PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+9. LIMITATION OF LIABILITY
+
+  IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+  FROM, OUT OF, OR IN CONNECTION WITH THE PROJECT OR ITS USE.
+
+10. GOVERNING LAW
+
+  This License is governed by the laws of India. Any dispute arising out
+  of or in connection with this License shall be subject to the exclusive
+  jurisdiction of the competent courts in India.
+
+---
+
+For permission requests, contact the Owner.

@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Swords, Play, Loader2, CalendarClock } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { PageHeader, Card, StatusPill, Button, StatTile } from '../components/ui'
+import { PageHeader, Card, StatusPill, Button, StatTile, DataSource } from '../components/ui'
 import { PT_SCENARIOS, READINESS_HISTORY } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 
 const AXIS_TICK = { fill: '#6e7b8a', fontSize: 11, fontFamily: 'JetBrains Mono' }
 const TOOLTIP_STYLE = {
@@ -14,10 +16,24 @@ export default function PurpleTeam() {
   const [running, setRunning] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  function run(id: string) {
+  const scenarios = useApi<typeof PT_SCENARIOS>(() => endpoints.purpleScenarios(), PT_SCENARIOS)
+  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+
+  // Really replays the scenario against the live detection pipeline; the
+  // backend times detection + containment and returns the scored result.
+  async function run(id: string) {
     setRunning(id)
     setDone(null)
-    setTimeout(() => { setRunning(null); setDone(id) }, 2200)
+    try {
+      await endpoints.runScenario(id)
+      setDone(id)
+      scenarios.reload()
+      readiness.reload()
+    } catch {
+      setDone(null)
+    } finally {
+      setRunning(null)
+    }
   }
 
   return (
@@ -26,9 +42,12 @@ export default function PurpleTeam() {
         title="Purple Team Console"
         subtitle="The system attacks itself every night against the real detection pipeline, then publishes the score. Trust through evidence — one of the few platforms that closes this loop."
       >
-        <span className="inline-flex items-center gap-1.5 font-mono text-xs text-ink-2">
-          <CalendarClock size={13} aria-hidden /> nightly sweep 03:00 IST
-        </span>
+        <div className="flex items-center gap-2">
+          <DataSource live={scenarios.live} loading={scenarios.loading} />
+          <span className="inline-flex items-center gap-1.5 font-mono text-xs text-ink-2">
+            <CalendarClock size={13} aria-hidden /> nightly sweep 03:00 IST
+          </span>
+        </div>
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -41,7 +60,7 @@ export default function PurpleTeam() {
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card title="Scenario library" className="xl:col-span-2" padded={false}>
           <ul className="divide-y divide-border-subtle">
-            {PT_SCENARIOS.map((s) => (
+            {scenarios.data.map((s) => (
               <li key={s.id} className="px-4 py-3.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2.5">
@@ -79,7 +98,7 @@ export default function PurpleTeam() {
         <div className="space-y-4">
           <Card title="Readiness trend — 6 weeks">
             <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={READINESS_HISTORY} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+              <LineChart data={readiness.data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
                 <CartesianGrid stroke="#21262d" vertical={false} />
                 <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
                 <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />

@@ -1,5 +1,5 @@
 import type { ReactNode, ButtonHTMLAttributes } from 'react'
-import { Crown, ShieldAlert, ShieldCheck, AlertTriangle, Info, type LucideIcon } from 'lucide-react'
+import { Crown, ShieldAlert, ShieldCheck, AlertTriangle, Info, Wifi, WifiOff, type LucideIcon } from 'lucide-react'
 import { cn, type Severity, type Criticality, type AutonomyLevel, AUTONOMY_LABELS } from '../lib/utils'
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
@@ -111,6 +111,29 @@ export function Badge({ tone = 'neutral', children, className }: {
   )
 }
 
+/**
+ * Live vs offline indicator.
+ *
+ * Shown wherever a screen may be rendering `mock.ts` fixtures because the API
+ * was unreachable. Being explicit about this matters: a demo that silently
+ * shows fake data as if it were real is the thing an examiner is entitled to
+ * be annoyed about.
+ */
+export function DataSource({ live, loading }: { live: boolean; loading?: boolean }) {
+  if (loading) return <Badge tone="neutral">connecting…</Badge>
+  return live ? (
+    <Badge tone="green">
+      <Wifi size={11} aria-hidden />
+      LIVE API
+    </Badge>
+  ) : (
+    <Badge tone="amber">
+      <WifiOff size={11} aria-hidden />
+      OFFLINE FIXTURES
+    </Badge>
+  )
+}
+
 const SEVERITY_META: Record<Severity, { tone: 'red' | 'amber' | 'blue'; icon: LucideIcon }> = {
   critical: { tone: 'red', icon: ShieldAlert },
   high: { tone: 'red', icon: AlertTriangle },
@@ -190,19 +213,24 @@ export function Segmented<T extends string>({ options, value, onChange, ariaLabe
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative h-5.5 w-10 cursor-pointer rounded-full border transition-colors duration-200',
+        'relative h-5.5 w-10 shrink-0 cursor-pointer rounded-full border transition-colors duration-200',
         checked ? 'border-accent bg-accent-dim' : 'border-border bg-surface-2',
       )}
     >
+      {/* left-0.5 anchors the knob; travel is (track 40 − knob 16 − 2×2 inset)
+          = 20px, so translate-x-5 lands it flush inside the right edge.
+          Without the explicit left anchor the knob starts wherever the browser
+          auto-positions it and slides straight out of the track. */}
       <span
         className={cn(
-          'absolute top-0.5 h-4 w-4 rounded-full transition-transform duration-200',
-          checked ? 'translate-x-5 bg-accent' : 'translate-x-0.5 bg-ink-3',
+          'absolute top-0.5 left-0.5 h-4 w-4 rounded-full transition-transform duration-200',
+          checked ? 'translate-x-5 bg-accent' : 'translate-x-0 bg-ink-3',
         )}
       />
     </button>

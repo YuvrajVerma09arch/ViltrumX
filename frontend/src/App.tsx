@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import AppLayout from './components/AppLayout'
+import { auth } from './lib/api'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
@@ -14,13 +15,26 @@ import PurpleTeam from './pages/PurpleTeam'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 
+/** Gate the product screens behind a real JWT — no token, no command deck. */
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!auth.isAuthenticated) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/app" element={<AppLayout />}>
+        <Route
+          path="/app"
+          element={
+            <RequireAuth>
+              <AppLayout />
+            </RequireAuth>
+          }
+        >
           <Route index element={<CommandDeck />} />
           <Route path="onboarding" element={<Onboarding />} />
           <Route path="ontology" element={<OntologyExplorer />} />

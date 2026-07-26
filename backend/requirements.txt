@@ -16,6 +16,9 @@ celery[redis]>=5.4
 redis>=5.0
 channels>=4.1
 channels-redis>=4.2
+# ASGI server — required for WebSockets. `manage.py runserver` is WSGI-only
+# and 404s the /ws/ upgrade, so the Command Deck stream needs daphne.
+daphne>=4.1
 
 # Graph (Week 2)
 neo4j>=5.23

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ViltrumX — Identity Preview</title>
+<style>
+  body { margin: 0; background: #0d1117; color: #e6edf3; font-family: Inter, -apple-system, sans-serif; padding: 48px; }
+  h1 { font-weight: 800; letter-spacing: 1px; }
+  h1 span { color: #3fb950; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; margin-top: 32px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 32px; text-align: center; }
+  .card.light { background: #f6f8fa; color: #0d1117; }
+  .card h2 { font-size: 13px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: #9ba7b4; margin: 0 0 24px; }
+  .card.light h2 { color: #57606a; }
+  .card img { max-width: 100%; }
+  .sizes { display: flex; align-items: flex-end; justify-content: center; gap: 24px; }
+  .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+  <h1>VILTRUM<span>X</span> — identity preview</h1>
+  <div class="grid">
+    <div class="card">
+      <h2>Primary mark</h2>
+      <img src="viltrumx-mark.svg" width="220" alt="primary mark">
+    </div>
+    <div class="card">
+      <h2>App icon</h2>
+      <img src="viltrumx-app-icon.svg" width="220" alt="app icon">
+    </div>
+    <div class="card light">
+      <h2>Mono · light background</h2>
+      <img src="viltrumx-mark-mono.svg" width="220" alt="mono mark">
+    </div>
+    <div class="card">
+      <h2>Favicon · small sizes</h2>
+      <div class="sizes">
+        <img src="../frontend/public/favicon.svg" width="64" alt="favicon 64">
+        <img src="../frontend/public/favicon.svg" width="32" alt="favicon 32">
+        <img src="../frontend/public/favicon.svg" width="16" alt="favicon 16">
+      </div>
+    </div>
+    <div class="card wide">
+      <h2>Wordmark</h2>
+      <img src="viltrumx-wordmark.svg" width="620" alt="wordmark">
+    </div>
+  </div>
+</body>
+</html>

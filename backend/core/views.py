@@ -1,195 +1,300 @@
 """
-Stub API v1 — serves the PayKraft fixtures so the frontend runs against a real
-authenticated server from day 0.
-
-YUVRAJ: this file is your worklist. Each view has a `# WEEK n:` note saying
-what replaces it (see docs/BUILD-PLAN.md). Replace stubs one at a time; the
-frontend can't tell the difference as long as the response shape holds.
+API v1 — real implementations over the Week-1 ledger (Postgres), the Week-2
+ontology (Neo4j with a Postgres-mirror fallback), Week-3 detection scores,
+and Week-4 reports. Response shapes match frontend/src/data/mock.ts exactly
+(camelCase — the built frontend depends on them).
 """
 
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from actions import demo_state
+from actions import executor
+from actions.models import Action, AutonomyPolicy
 from core import demo_data
-from reports.demo_narratives import NARRATIVE
+from core.models import AgentState, FeedLine, Incident, Membership
+from core.serializers import (
+    ActionSerializer,
+    AgentStateSerializer,
+    AttackStepSerializer,
+    EvidenceSerializer,
+    FeedLineSerializer,
+    IncidentSerializer,
+    MemberSerializer,
+    ProvenanceStepSerializer,
+)
+from core.tenancy import tenant_for
 
 
-class FixtureView(APIView):
-    """Return a static fixture. Subclasses set `payload`."""
+class TenantAPIView(APIView):
+    """Base: resolves the caller's tenant once per request."""
 
     permission_classes = [IsAuthenticated]
-    payload: object = None
 
-    def get(self, request, **kwargs):
-        return Response(self.payload)
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = tenant_for(request)
 
 
 # ── Command Deck ─────────────────────────────────────────────────────────────
-class AgentStatusView(FixtureView):
-    # WEEK 3: orchestrator heartbeats via Redis instead of a fixture
-    payload = demo_data.AGENTS
+class AgentStatusView(TenantAPIView):
+    def get(self, request):
+        states = AgentState.objects.filter(tenant=self.tenant)
+        return Response(AgentStateSerializer(states, many=True).data)
 
 
-class ActivityFeedView(FixtureView):
-    # WEEK 3: tail of the per-tenant Redis event stream
-    payload = demo_data.ACTIVITY_FEED
+class ActivityFeedView(TenantAPIView):
+    def get(self, request):
+        lines = FeedLine.objects.filter(tenant=self.tenant)[:40]
+        return Response(FeedLineSerializer(lines, many=True).data)
 
 
-class IncidentListView(FixtureView):
-    # WEEK 1: Incident.objects.for_tenant(request.user) + serializer
-    payload = demo_data.INCIDENTS
+class IncidentListView(TenantAPIView):
+    def get(self, request):
+        incidents = Incident.objects.filter(tenant=self.tenant)
+        return Response(IncidentSerializer(incidents, many=True).data)
 
 
-class IncidentDetailView(APIView):
-    # WEEK 1: get_object_or_404 on the Incident model
-    permission_classes = [IsAuthenticated]
-
+class IncidentDetailView(TenantAPIView):
     def get(self, request, incident_id: str):
-        incident = next((i for i in demo_data.INCIDENTS if i["id"] == incident_id), None)
+        incident = Incident.objects.filter(
+            tenant=self.tenant, external_id=incident_id
+        ).first()
         if incident is None:
             return Response({"detail": "Not found."}, status=404)
         return Response(
-            {**incident, "attackChain": demo_data.ATTACK_CHAIN, "evidence": demo_data.EVIDENCE}
+            {
+                **IncidentSerializer(incident).data,
+                "attackChain": AttackStepSerializer(
+                    incident.attack_steps.all(), many=True
+                ).data,
+                "evidence": EvidenceSerializer(incident.evidence_items.all(), many=True).data,
+            }
         )
 
 
-class IncidentNarrativeView(APIView):
-    # WEEK 4: grounded LLM generation (Groq/Ollama) + IndicTrans2 rendering
-    permission_classes = [IsAuthenticated]
-
+class IncidentNarrativeView(TenantAPIView):
     def get(self, request, incident_id: str):
+        from reports.narratives import get_narrative
+
         lang = request.query_params.get("lang", "en")
-        if lang not in NARRATIVE:
-            return Response({"detail": f"lang must be one of {sorted(NARRATIVE)}"}, status=400)
-        return Response(NARRATIVE[lang])
+        narrative = get_narrative(self.tenant, incident_id, lang)
+        if narrative is None:
+            return Response({"detail": "lang must be one of ['en', 'gu', 'hi']"}, status=400)
+        return Response(narrative)
 
 
 # ── Ontology / inventory / onboarding ────────────────────────────────────────
-class OntologyGraphView(FixtureView):
-    # WEEK 2: Cypher MATCH over Neo4j, tenant-scoped
-    payload = {"nodes": demo_data.ONT_NODES, "edges": demo_data.ONT_EDGES}
-
-
-class InventoryView(APIView):
-    # WEEK 2: derived from ontology objects by label
-    permission_classes = [IsAuthenticated]
-    CATEGORIES = {
-        "identities": demo_data.INV_IDENTITIES,
-        "cloud": demo_data.INV_CLOUD,
-        "repos": demo_data.INV_REPOS,
-        "saas": demo_data.INV_SAAS,
-    }
-
+class OntologyGraphView(TenantAPIView):
     def get(self, request):
+        from ontology.graph import get_graph
+
+        return Response(get_graph(self.tenant))
+
+
+class InventoryView(TenantAPIView):
+    def get(self, request):
+        from ontology.graph import get_inventory
+
         category = request.query_params.get("category", "identities")
-        if category not in self.CATEGORIES:
-            valid = sorted(self.CATEGORIES)
+        rows = get_inventory(self.tenant, category)
+        if rows is None:
+            valid = ["cloud", "identities", "repos", "saas"]
             return Response({"detail": f"category must be one of {valid}"}, status=400)
-        return Response(self.CATEGORIES[category])
+        return Response(rows)
 
 
-class ConnectorListView(FixtureView):
-    # WEEK 2: Connector model rows + real GitHub connector status
-    payload = demo_data.CONNECTORS
+class ConnectorListView(TenantAPIView):
+    def get(self, request):
+        from connectors.models import Connector
+
+        rows = []
+        states = {c.connector_id: c for c in Connector.objects.filter(tenant=self.tenant)}
+        for fixture in demo_data.CONNECTORS:
+            state = states.get(fixture["id"])
+            rows.append({**fixture, "status": state.status if state else fixture["status"]})
+        return Response(rows)
+
+
+class ConnectorConnectView(TenantAPIView):
+    def post(self, request, connector_id: str):
+        from connectors.models import Connector
+
+        known = {c["id"]: c for c in demo_data.CONNECTORS}
+        if connector_id not in known:
+            return Response({"detail": "Unknown connector."}, status=404)
+        connector, _ = Connector.objects.update_or_create(
+            tenant=self.tenant, connector_id=connector_id,
+            defaults={"name": known[connector_id]["name"], "status": "connected"},
+        )
+        return Response({**known[connector_id], "status": connector.status})
+
+
+class IngestReplayView(TenantAPIView):
+    def post(self, request):
+        from connectors.tasks import replay_synthetic_logs
+
+        scenario = request.data.get("scenario", "inc-042")
+        result = replay_synthetic_logs.delay(self.tenant.id, scenario)
+        return Response({"queued": True, "taskId": str(result.id), "scenario": scenario})
 
 
 # ── Risk / purple team / compliance ──────────────────────────────────────────
-class RiskTrendView(FixtureView):
-    # WEEK 3: aggregated detection scores from Postgres
-    payload = demo_data.RISK_TREND
+class RiskTrendView(TenantAPIView):
+    def get(self, request):
+        from detection.models import RiskSnapshot
+
+        # order_by the real column ("day" is the JSON key, day_label is the field)
+        rows = RiskSnapshot.objects.filter(tenant=self.tenant).order_by("day_label")
+        if not rows.exists():
+            return Response(demo_data.RISK_TREND)
+        return Response(
+            [{"day": r.day_label, "org": r.org_score, "forecast": r.forecast} for r in rows]
+        )
 
 
-class EntityRiskView(FixtureView):
-    # WEEK 3: top-N entity scores from the detection pipeline
-    payload = demo_data.ENTITY_RISK
+class EntityRiskView(TenantAPIView):
+    def get(self, request):
+        from detection.models import EntityRisk
+
+        rows = EntityRisk.objects.filter(tenant=self.tenant).order_by("-score")[:5]
+        if not rows.exists():
+            return Response(demo_data.ENTITY_RISK)
+        return Response(
+            [
+                {
+                    "entity": r.entity, "type": r.entity_type, "score": r.score,
+                    "trend": r.trend, "reason": r.reason,
+                }
+                for r in rows
+            ]
+        )
 
 
-class ReadinessView(FixtureView):
-    # WEEK 4: computed from purple-team run results
-    payload = demo_data.READINESS_HISTORY
+class ReadinessView(TenantAPIView):
+    def get(self, request):
+        from reports.models import ReadinessScore
+
+        rows = ReadinessScore.objects.filter(tenant=self.tenant).order_by("id")
+        if not rows.exists():
+            return Response(demo_data.READINESS_HISTORY)
+        return Response([{"week": r.week_label, "score": r.score} for r in rows])
 
 
-class PurpleScenariosView(FixtureView):
-    # WEEK 4: PurpleScenario model + nightly Celery beat results
-    payload = demo_data.PT_SCENARIOS
+class PurpleScenariosView(TenantAPIView):
+    def get(self, request):
+        from reports.models import PurpleScenario
+
+        rows = PurpleScenario.objects.filter(tenant=self.tenant).order_by("external_id")
+        if not rows.exists():
+            return Response(demo_data.PT_SCENARIOS)
+        return Response(
+            [
+                {
+                    "id": r.external_id, "name": r.name, "desc": r.desc,
+                    "lastRun": r.last_run_label, "result": r.result,
+                    "detection": r.detection_label, "containment": r.containment_label,
+                }
+                for r in rows
+            ]
+        )
 
 
-class FrameworksView(FixtureView):
-    # WEEK 4: control-mapping tables + evidence pack generator
-    payload = demo_data.FRAMEWORKS
+class PurpleRunView(TenantAPIView):
+    def post(self, request, scenario_id: str):
+        from reports.purple import run_scenario
+
+        row = run_scenario(self.tenant, scenario_id)
+        if row is None:
+            return Response({"detail": "Not found."}, status=404)
+        return Response(row)
 
 
-class RecentExportsView(FixtureView):
-    payload = demo_data.RECENT_EXPORTS
+class FrameworksView(TenantAPIView):
+    def get(self, request):
+        return Response(demo_data.FRAMEWORKS)
+
+
+class RecentExportsView(TenantAPIView):
+    def get(self, request):
+        from reports.models import ComplianceExport
+
+        rows = ComplianceExport.objects.filter(tenant=self.tenant).order_by("-created_at")[:10]
+        if not rows.exists():
+            return Response(demo_data.RECENT_EXPORTS)
+        return Response([{"name": r.name, "kind": r.kind, "when": r.when_label} for r in rows])
+
+
+class ComplianceExportView(TenantAPIView):
+    def post(self, request, framework_id: str):
+        from reports.compliance import generate_export
+
+        row = generate_export(self.tenant, framework_id, actor=request.user.username)
+        if row is None:
+            return Response({"detail": "Unknown framework."}, status=404)
+        return Response(row, status=201)
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────
-class MemberListView(FixtureView):
-    # WEEK 1: Membership model + RBAC roles
-    payload = demo_data.MEMBERS
-
-
-class InvoiceListView(FixtureView):
-    # stub-tier for viva (BUILD-PLAN: billing stays fixture-backed)
-    payload = demo_data.INVOICES
-
-
-# ── Actions / policies (mutable in-memory stubs — see actions/demo_state.py) ─
-class ActionListView(APIView):
-    # WEEK 1: Action model + governed lifecycle
-    permission_classes = [IsAuthenticated]
-
+class MemberListView(TenantAPIView):
     def get(self, request):
-        return Response(demo_state.list_actions())
+        members = Membership.objects.filter(tenant=self.tenant).select_related("user")
+        return Response(MemberSerializer(members, many=True).data)
 
 
-class ActionTraceView(APIView):
-    # WEEK 1: ProvenanceStep rows for the action
-    permission_classes = [IsAuthenticated]
+class InvoiceListView(TenantAPIView):
+    # stub-tier for viva (BUILD-PLAN: billing stays fixture-backed)
+    def get(self, request):
+        return Response(demo_data.INVOICES)
 
+
+# ── Actions / policies (governed lifecycle) ──────────────────────────────────
+class ActionListView(TenantAPIView):
+    def get(self, request):
+        actions = Action.objects.filter(tenant=self.tenant)
+        return Response(ActionSerializer(actions, many=True).data)
+
+
+class ActionTraceView(TenantAPIView):
     def get(self, request, action_id: str):
-        if not demo_state.action_exists(action_id):
-            return Response({"detail": "Not found."}, status=404)
-        return Response(demo_data.PROVENANCE_TRACE)
-
-
-class ActionRollbackView(APIView):
-    # WEEK 1: executor.rollback() + new provenance record + audit event
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, action_id: str):
-        action = demo_state.rollback_action(action_id)
+        action = Action.objects.filter(tenant=self.tenant, external_id=action_id).first()
         if action is None:
+            return Response({"detail": "Not found."}, status=404)
+        return Response(ProvenanceStepSerializer(action.trace.all(), many=True).data)
+
+
+class ActionRollbackView(TenantAPIView):
+    def post(self, request, action_id: str):
+        action = Action.objects.filter(tenant=self.tenant, external_id=action_id).first()
+        if action is None or executor.rollback_action(action, request.user.username) is None:
             return Response({"detail": "Not found or not rollbackable."}, status=409)
-        return Response(action)
+        return Response(ActionSerializer(action).data)
 
 
-class ActionDecisionView(APIView):
-    # WEEK 1: approve/reject an L4 proposal; the override becomes a labeled
-    # training signal (CLAUDE.md §4 closed feedback loop)
-    permission_classes = [IsAuthenticated]
-
+class ActionDecisionView(TenantAPIView):
     def post(self, request, action_id: str):
         decision = request.data.get("decision")
         if decision not in ("approve", "reject"):
             return Response({"detail": "decision must be 'approve' or 'reject'"}, status=400)
-        action = demo_state.decide_action(action_id, decision)
-        if action is None:
+        action = Action.objects.filter(tenant=self.tenant, external_id=action_id).first()
+        decided = (
+            executor.decide_action(action, decision, request.user.username)
+            if action is not None
+            else None
+        )
+        if decided is None:
             return Response({"detail": "Not found or not pending."}, status=409)
-        return Response(action)
+        return Response(ActionSerializer(action).data)
 
 
-class PolicyView(APIView):
-    # WEEK 1: versioned AutonomyPolicy model; PUT creates a new version + audit
-    permission_classes = [IsAuthenticated]
-
+class PolicyView(TenantAPIView):
     def get(self, request):
-        return Response(demo_state.get_policies())
+        policy = AutonomyPolicy.current_for(self.tenant)
+        return Response(policy.as_rows() if policy else [])
 
     def put(self, request):
         try:
-            return Response(demo_state.set_policies(request.data))
+            policy = executor.save_policy(self.tenant, request.data, request.user.username)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
+        return Response(policy.as_rows())

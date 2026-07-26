@@ -2,15 +2,17 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { Button } from '../components/ui'
+import { login } from '../lib/api'
 
 export default function Login() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState('arjun.mehta@paykraft.in')
+  const [password, setPassword] = useState('viltrumx-demo')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       setError('Enter a valid work email — e.g. you@company.in')
@@ -18,7 +20,16 @@ export default function Login() {
     }
     setError('')
     setLoading(true)
-    setTimeout(() => navigate(mode === 'signup' ? '/app/onboarding' : '/app'), 700)
+    try {
+      await login(email, password)
+      navigate(mode === 'signup' ? '/app/onboarding' : '/app')
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Sign-in failed — is the API running?',
+      )
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -55,10 +66,20 @@ export default function Login() {
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-2">
-            <button className="cursor-pointer rounded-md border border-border py-2.5 text-sm font-medium transition-colors hover:bg-surface-2">
+            <button
+              type="button"
+              disabled
+              title="OAuth SSO is roadmap — use the email form below"
+              className="rounded-md border border-border py-2.5 text-sm font-medium text-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Google Workspace
             </button>
-            <button className="cursor-pointer rounded-md border border-border py-2.5 text-sm font-medium transition-colors hover:bg-surface-2">
+            <button
+              type="button"
+              disabled
+              title="OAuth SSO is roadmap — use the email form below"
+              className="rounded-md border border-border py-2.5 text-sm font-medium text-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
+            >
               GitHub
             </button>
           </div>
@@ -88,6 +109,8 @@ export default function Login() {
             <div className="mb-5">
               <label htmlFor="password" className="mb-1.5 block text-sm font-medium">Password <span className="text-danger">*</span></label>
               <input id="password" type="password" autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm focus:border-accent focus:outline-none" />
               <p className="mt-1.5 text-xs text-ink-3">12+ characters. SSO enforcement available on the Growth plan.</p>
             </div>

@@ -1,16 +1,62 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Briefcase, FileSearch, ArrowRight } from 'lucide-react'
-import { PageHeader, Card, Badge, SeverityBadge, StatusPill, Button, Segmented, Toggle, StatTile } from '../components/ui'
-import { ATTACK_CHAIN, EVIDENCE, INCIDENTS } from '../data/mock'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Briefcase, FileSearch, ArrowRight, Loader2 } from 'lucide-react'
+import { PageHeader, Card, Badge, SeverityBadge, StatusPill, Button, Segmented, Toggle, StatTile, DataSource } from '../components/ui'
+import { ATTACK_CHAIN, EVIDENCE, INCIDENTS, type Action, type ChainStep, type Incident } from '../data/mock'
 import { NARRATIVE, LANG_OPTIONS, type Lang } from '../data/i18n'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { cn } from '../lib/utils'
+
+type Evidence = { id: string; kind: string; source: string; excerpt: string }
+type IncidentDetail = Incident & { attackChain?: ChainStep[]; evidence?: Evidence[] }
 
 export default function Investigation() {
   const [lang, setLang] = useState<Lang>('en')
   const [founderMode, setFounderMode] = useState(false)
-  const n = NARRATIVE[lang]
-  const inc = INCIDENTS[0]
+  const [params] = useSearchParams()
+  const incidentId = params.get('incident') ?? 'INC-042'
+
+  const detail = useApi<IncidentDetail>(
+    () => endpoints.incident(incidentId),
+    { ...INCIDENTS[0], attackChain: ATTACK_CHAIN, evidence: EVIDENCE as Evidence[] },
+    [incidentId],
+  )
+
+  // The Explainability agent renders EN/HI/GU server-side (IndicTrans2 for the
+  // Indic languages); the local i18n strings are the offline fallback.
+  const narrative = useApi<typeof NARRATIVE.en>(
+    () => endpoints.narrative(incidentId, lang),
+    NARRATIVE[lang],
+    [incidentId, lang],
+  )
+
+  const inc = detail.data
+  const n = narrative.data
+  const chain = inc.attackChain ?? ATTACK_CHAIN
+  const evidence = inc.evidence ?? (EVIDENCE as Evidence[])
+
+  // Founder Mode's "approve" button acts on the real pending L4 action, so the
+  // founder-facing view and the analyst-facing Provenance view drive the same
+  // governed lifecycle — there is no separate, cosmetic approval path.
+  const actions = useApi<Action[]>(() => endpoints.actions(), [])
+  const pendingL4 = actions.data.find((a) => a.status === 'proposed')
+  const [deciding, setDeciding] = useState(false)
+  const [decision, setDecision] = useState('')
+
+  async function approveL4() {
+    if (!pendingL4) return
+    setDeciding(true)
+    try {
+      await endpoints.decide(pendingL4.id, 'approve')
+      setDecision(`${pendingL4.id} approved — executed and written to provenance.`)
+      actions.reload()
+    } catch (err) {
+      setDecision(err instanceof Error ? err.message : 'Could not apply the decision.')
+    } finally {
+      setDeciding(false)
+    }
+  }
 
   return (
     <div>
@@ -18,6 +64,7 @@ export default function Investigation() {
         title="Investigation Workspace"
         subtitle={<span className="font-mono">{inc.id} · {inc.title}</span>}
       >
+        <DataSource live={detail.live} loading={detail.loading} />
         <SeverityBadge severity={inc.severity} />
         <StatusPill status={inc.status} />
       </PageHeader>
@@ -26,9 +73,9 @@ export default function Investigation() {
         {/* Attack chain timeline */}
         <Card title="Attack chain — forensic timeline" className="xl:col-span-3" padded={false}>
           <ol className="relative p-5">
-            {ATTACK_CHAIN.map((step, i) => (
-              <li key={step.time} className="relative pb-6 pl-8 last:pb-0">
-                {i < ATTACK_CHAIN.length - 1 && (
+            {chain.map((step, i) => (
+              <li key={`${step.time}-${i}`} className="relative pb-6 pl-8 last:pb-0">
+                {i < chain.length - 1 && (
                   <span className="absolute top-5 left-[9px] h-full w-px bg-border" aria-hidden />
                 )}
                 <span className={cn(
@@ -80,10 +127,21 @@ export default function Investigation() {
                 </div>
                 <div className="mt-4 rounded-md border border-status-warning/30 bg-status-warning/5 p-3.5">
                   <p className="text-sm font-medium">{n.decision}</p>
-                  <div className="mt-2.5 flex gap-2">
-                    <Button size="sm">Approve freeze (L4)</Button>
-                    <Button size="sm" variant="outline">Ask the Detective more</Button>
-                  </div>
+                  {decision ? (
+                    <p className="mt-2.5 rounded-md border border-info/30 bg-info/10 px-3 py-2 text-sm text-info">
+                      {decision}
+                    </p>
+                  ) : (
+                    <div className="mt-2.5 flex gap-2">
+                      <Button size="sm" disabled={!pendingL4 || deciding} onClick={approveL4}>
+                        {deciding && <Loader2 size={13} className="animate-spin" aria-hidden />}
+                        {pendingL4 ? `Approve ${pendingL4.type} (${pendingL4.level})` : 'No L4 pending'}
+                      </Button>
+                      <Link to="/app/provenance">
+                        <Button size="sm" variant="outline">Review the decision trace</Button>
+                      </Link>
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -95,7 +153,7 @@ export default function Investigation() {
           {/* Evidence locker */}
           <Card title="Evidence locker" padded={false}>
             <ul className="divide-y divide-border-subtle">
-              {EVIDENCE.map((ev) => (
+              {evidence.map((ev) => (
                 <li key={ev.id} className="px-4 py-3">
                   <div className="flex items-center gap-2 text-xs">
                     <FileSearch size={13} className="shrink-0 text-ink-3" aria-hidden />

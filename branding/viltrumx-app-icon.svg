@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ViltrumX app icon">
+  <defs>
+    <linearGradient id="vxa-hex" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#56d364"/>
+      <stop offset="1" stop-color="#2ea043"/>
+    </linearGradient>
+    <linearGradient id="vxa-shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2432"/>
+      <stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+    <filter id="vxa-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="#0d1117"/>
+  <rect x="6" y="6" width="500" height="500" rx="106" fill="none" stroke="#21262d" stroke-width="2"/>
+
+  <g transform="translate(51.2 51.2) scale(0.8)">
+    <path d="M256 64 L422 160 V352 L256 448 L90 352 V160 Z"
+          fill="none" stroke="url(#vxa-hex)" stroke-width="16" stroke-linejoin="round"/>
+    <path d="M256 150 L352 190 V254 C352 314 312 358 256 374 C200 358 160 314 160 254 V190 Z"
+          fill="url(#vxa-shield)" stroke="#3fb950" stroke-width="10" stroke-linejoin="round"/>
+    <path d="M212 222 L256 306 L300 222" fill="none" stroke="#56d364" stroke-width="22"
+          stroke-linecap="round" stroke-linejoin="round" filter="url(#vxa-glow)" opacity="0.45"/>
+    <path d="M212 222 L256 306 L300 222" fill="none" stroke="#56d364" stroke-width="20"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <g fill="#0d1117" stroke="url(#vxa-hex)" stroke-width="6">
+      <circle cx="256" cy="64" r="13"/>
+      <circle cx="422" cy="160" r="13"/>
+      <circle cx="422" cy="352" r="13"/>
+      <circle cx="256" cy="448" r="13"/>
+      <circle cx="90" cy="352" r="13"/>
+      <circle cx="90" cy="160" r="13"/>
+    </g>
+  </g>
+</svg>

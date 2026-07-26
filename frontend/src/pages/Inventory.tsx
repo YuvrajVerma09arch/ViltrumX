@@ -1,6 +1,8 @@
 import { useState } from 'react'
-import { PageHeader, Card, Table, Td, CriticalityBadge, ProgressBar, Badge, Segmented } from '../components/ui'
+import { PageHeader, Card, Table, Td, CriticalityBadge, ProgressBar, Badge, Segmented, DataSource } from '../components/ui'
 import { INV_IDENTITIES, INV_CLOUD, INV_REPOS, INV_SAAS } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import type { Criticality } from '../lib/utils'
 
 type Tab = 'identities' | 'cloud' | 'repos' | 'saas'
@@ -8,23 +10,33 @@ type Tab = 'identities' | 'cloud' | 'repos' | 'saas'
 type Row = { name: string; kind: string; posture?: string; mfa?: boolean; risk: number; criticality: Criticality }
 
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'identities', label: 'Identities (6)' },
-  { value: 'cloud', label: 'Cloud (4)' },
-  { value: 'repos', label: 'Repos (3)' },
-  { value: 'saas', label: 'SaaS (3)' },
+  { value: 'identities', label: 'Identities' },
+  { value: 'cloud', label: 'Cloud' },
+  { value: 'repos', label: 'Repos' },
+  { value: 'saas', label: 'SaaS' },
 ]
+
+const FIXTURES: Record<Tab, Row[]> = {
+  identities: INV_IDENTITIES,
+  cloud: INV_CLOUD,
+  repos: INV_REPOS,
+  saas: INV_SAAS,
+}
 
 export default function Inventory() {
   const [tab, setTab] = useState<Tab>('identities')
 
-  const rows: Row[] = tab === 'identities' ? INV_IDENTITIES : tab === 'cloud' ? INV_CLOUD : tab === 'repos' ? INV_REPOS : INV_SAAS
+  // Refetches on tab change — the category is a server-side query param.
+  const inventory = useApi<Row[]>(() => endpoints.inventory(tab), FIXTURES[tab], [tab])
+  const rows = inventory.data
 
   return (
     <div>
       <PageHeader
         title="Attack Surface Inventory"
-        subtitle="Everything the ontology tracks, with posture and founder-assigned criticality. 16 objects · resynced 41 s ago."
+        subtitle={`Everything the ontology tracks, with posture and founder-assigned criticality. ${rows.length} object${rows.length === 1 ? '' : 's'} in this category.`}
       >
+        <DataSource live={inventory.live} loading={inventory.loading} />
         <Segmented ariaLabel="Inventory category" options={TABS} value={tab} onChange={setTab} />
       </PageHeader>
 

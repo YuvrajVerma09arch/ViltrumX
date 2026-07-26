@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { TrendingUp, TrendingDown } from 'lucide-react'
-import { PageHeader, Card, StatTile, Toggle, ProgressBar, Badge } from '../components/ui'
+import { PageHeader, Card, StatTile, Toggle, ProgressBar, Badge, DataSource } from '../components/ui'
 import { RISK_TREND, ENTITY_RISK, READINESS_HISTORY } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { formatINR } from '../lib/utils'
 
 const AXIS_TICK = { fill: '#6e7b8a', fontSize: 11, fontFamily: 'JetBrains Mono' }
@@ -30,6 +32,10 @@ function ReadinessGauge({ value }: { value: number }) {
 export default function RiskDashboard() {
   const [founderMode, setFounderMode] = useState(false)
 
+  const trend = useApi<typeof RISK_TREND>(() => endpoints.riskTrend(), RISK_TREND)
+  const entities = useApi<typeof ENTITY_RISK>(() => endpoints.riskEntities(), ENTITY_RISK)
+  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+
   return (
     <div>
       <PageHeader
@@ -38,6 +44,7 @@ export default function RiskDashboard() {
           ? 'The same numbers your security system sees — translated into what they cost.'
           : 'Behavioral ML risk scores, 5-day forecast, and defense readiness — recomputed hourly.'}
       >
+        <DataSource live={trend.live} loading={trend.loading} />
         <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5">
           <span className="text-xs font-medium">Founder Mode</span>
           <Toggle checked={founderMode} onChange={setFounderMode} label="Founder Mode" />
@@ -67,7 +74,7 @@ export default function RiskDashboard() {
         {/* Risk trend + forecast */}
         <Card title={founderMode ? 'How exposed were we? (last 14 days)' : 'Org risk — observed & forecast'} className="xl:col-span-2">
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={RISK_TREND} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
+            <LineChart data={trend.data} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
               <CartesianGrid stroke="#21262d" vertical={false} />
               <XAxis dataKey="day" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
               <YAxis domain={[0, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
@@ -89,7 +96,7 @@ export default function RiskDashboard() {
           <ReadinessGauge value={94} />
           <p className="mt-1 text-center text-xs text-ink-3">validated 03:24 IST by the nightly purple-team sweep</p>
           <ResponsiveContainer width="100%" height={110}>
-            <LineChart data={READINESS_HISTORY} margin={{ top: 16, right: 8, bottom: 0, left: -22 }}>
+            <LineChart data={readiness.data} margin={{ top: 16, right: 8, bottom: 0, left: -22 }}>
               <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
               <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
               <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
@@ -102,7 +109,7 @@ export default function RiskDashboard() {
       {/* Entity risk table */}
       <Card title={founderMode ? 'What should worry you, in plain words' : 'Highest-risk entities'} className="mt-4" padded={false}>
         <ul className="divide-y divide-border-subtle">
-          {ENTITY_RISK.map((e) => (
+          {entities.data.map((e) => (
             <li key={e.entity} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
               <div className="w-56 min-w-0">
                 <div className="truncate font-mono text-[13px] font-semibold">{e.entity}</div>

@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Check, Crown, Plug } from 'lucide-react'
-import { PageHeader, Card, Button, StatusPill, CriticalityBadge, Segmented } from '../components/ui'
+import { PageHeader, Card, Button, StatusPill, CriticalityBadge, Segmented, DataSource } from '../components/ui'
 import { CONNECTORS } from '../data/mock'
+import { endpoints } from '../lib/api'
+import { useApi } from '../lib/hooks'
 import { cn, type Criticality } from '../lib/utils'
 
 const STEPS = ['Org profile', 'Connect sources', 'Tag crown jewels', 'Autonomy defaults']
@@ -17,7 +19,27 @@ const JEWEL_CANDIDATES: { name: string; kind: string; initial: Criticality }[] =
 
 export default function Onboarding() {
   const [step, setStep] = useState(1)
-  const [connected, setConnected] = useState<Record<string, boolean>>({ gw: true, gh: true, aws: true })
+  const connectors = useApi<typeof CONNECTORS>(() => endpoints.connectors(), CONNECTORS)
+  const [connected, setConnected] = useState<Record<string, boolean>>({})
+
+  // Seed local toggle state from whatever the server already has connected.
+  useEffect(() => {
+    setConnected(
+      Object.fromEntries(connectors.data.map((c) => [c.id, c.status === 'connected'])),
+    )
+  }, [connectors.data])
+
+  // Persist the connection so it survives a reload — the wizard is a real
+  // setup flow, not a slideshow.
+  async function connect(id: string) {
+    setConnected((prev) => ({ ...prev, [id]: true }))
+    try {
+      await endpoints.connect(id)
+    } catch {
+      setConnected((prev) => ({ ...prev, [id]: false }))
+    }
+  }
+
   const [jewels, setJewels] = useState<Record<string, Criticality>>(
     Object.fromEntries(JEWEL_CANDIDATES.map((j) => [j.name, j.initial])),
   )
@@ -29,7 +51,9 @@ export default function Onboarding() {
       <PageHeader
         title="Onboarding & Integrations"
         subtitle="Connect your world in under 10 minutes. The ontology builds itself from what you plug in."
-      />
+      >
+        <DataSource live={connectors.live} loading={connectors.loading} />
+      </PageHeader>
 
       {/* Stepper */}
       <ol className="mb-8 flex items-center gap-2" aria-label="Onboarding progress">
@@ -89,7 +113,7 @@ export default function Onboarding() {
       {step === 2 && (
         <Card title="Step 2 · Connect sources">
           <ul className="space-y-2.5">
-            {CONNECTORS.map((c) => {
+            {connectors.data.map((c) => {
               const isOn = connected[c.id]
               return (
                 <li key={c.id} className="flex items-center justify-between gap-3 rounded-md border border-border-subtle bg-bg px-4 py-3">
@@ -103,7 +127,7 @@ export default function Onboarding() {
                   {isOn ? (
                     <StatusPill status="connected" />
                   ) : (
-                    <Button size="sm" variant="outline" onClick={() => setConnected({ ...connected, [c.id]: true })}>
+                    <Button size="sm" variant="outline" onClick={() => connect(c.id)}>
                       Connect
                     </Button>
                   )}
@@ -112,7 +136,7 @@ export default function Onboarding() {
             })}
           </ul>
           <div className="mt-5 flex items-center justify-between">
-            <p className="font-mono text-xs text-ink-3">{Object.values(connected).filter(Boolean).length} of {CONNECTORS.length} connected — 3 is enough to start</p>
+            <p className="font-mono text-xs text-ink-3">{Object.values(connected).filter(Boolean).length} of {connectors.data.length} connected — 3 is enough to start</p>
             <div className="flex gap-2">
               <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
               <Button onClick={() => setStep(3)}>Continue</Button>
