@@ -17,21 +17,21 @@ from __future__ import annotations
 UNKNOWN = {"id": "T9999", "name": "Unspecified Behavior", "tactic": "unknown", "confidence": 0.4}
 
 _MITRE = {
-    "T1078": {"id": "T1078", "name": "Valid Accounts", "tactic": "Defense Evasion + Persistence + Initial Access", "confidence": 0.85},
-    "T1110": {"id": "T1110", "name": "Brute Force", "tactic": "Credential Access", "confidence": 0.9},
-    "T1621": {"id": "T1621", "name": "Multi-Factor Authentication Request Generation", "tactic": "Credential Access", "confidence": 0.78},
-    "T1098": {"id": "T1098", "name": "Account Manipulation", "tactic": "Persistence + Privilege Escalation", "confidence": 0.82},
-    "T1098.001": {"id": "T1098.001", "name": "Additional Cloud Credentials", "tactic": "Persistence", "confidence": 0.85},
-    "T1552": {"id": "T1552", "name": "Unsecured Credentials", "tactic": "Credential Access", "confidence": 0.88},
-    "T1552.001": {"id": "T1552.001", "name": "Credentials In Files", "tactic": "Credential Access", "confidence": 0.88},
-    "T1213": {"id": "T1213", "name": "Data from Information Repositories", "tactic": "Collection", "confidence": 0.75},
-    "T1530": {"id": "T1530", "name": "Data from Cloud Storage", "tactic": "Collection", "confidence": 0.92},
-    "T1048": {"id": "T1048", "name": "Exfiltration Over Alternative Protocol", "tactic": "Exfiltration", "confidence": 0.9},
-    "T1537": {"id": "T1537", "name": "Transfer Data to Cloud Account", "tactic": "Exfiltration", "confidence": 0.88},
-    "T1078.004": {"id": "T1078.004", "name": "Cloud Accounts", "tactic": "Initial Access", "confidence": 0.85},
-    "T1136": {"id": "T1136", "name": "Create Account", "tactic": "Persistence", "confidence": 0.8},
-    "T1090": {"id": "T1090", "name": "Proxy", "tactic": "Command and Control", "confidence": 0.65},
-    "T1027": {"id": "T1027", "name": "Obfuscated Files or Information", "tactic": "Defense Evasion", "confidence": 0.6},
+    "T1078": {"id": "T1078", "name": "Valid Accounts", "tactic": "Defense Evasion + Persistence + Initial Access", "confidence": 0.85},  # noqa: E501
+    "T1110": {"id": "T1110", "name": "Brute Force", "tactic": "Credential Access", "confidence": 0.9},  # noqa: E501
+    "T1621": {"id": "T1621", "name": "Multi-Factor Authentication Request Generation", "tactic": "Credential Access", "confidence": 0.78},  # noqa: E501
+    "T1098": {"id": "T1098", "name": "Account Manipulation", "tactic": "Persistence + Privilege Escalation", "confidence": 0.82},  # noqa: E501
+    "T1098.001": {"id": "T1098.001", "name": "Additional Cloud Credentials", "tactic": "Persistence", "confidence": 0.85},  # noqa: E501
+    "T1552": {"id": "T1552", "name": "Unsecured Credentials", "tactic": "Credential Access", "confidence": 0.88},  # noqa: E501
+    "T1552.001": {"id": "T1552.001", "name": "Credentials In Files", "tactic": "Credential Access", "confidence": 0.88},  # noqa: E501
+    "T1213": {"id": "T1213", "name": "Data from Information Repositories", "tactic": "Collection", "confidence": 0.75},  # noqa: E501
+    "T1530": {"id": "T1530", "name": "Data from Cloud Storage", "tactic": "Collection", "confidence": 0.92},  # noqa: E501
+    "T1048": {"id": "T1048", "name": "Exfiltration Over Alternative Protocol", "tactic": "Exfiltration", "confidence": 0.9},  # noqa: E501
+    "T1537": {"id": "T1537", "name": "Transfer Data to Cloud Account", "tactic": "Exfiltration", "confidence": 0.88},  # noqa: E501
+    "T1078.004": {"id": "T1078.004", "name": "Cloud Accounts", "tactic": "Initial Access", "confidence": 0.85},  # noqa: E501
+    "T1136": {"id": "T1136", "name": "Create Account", "tactic": "Persistence", "confidence": 0.8},  # noqa: E501
+    "T1090": {"id": "T1090", "name": "Proxy", "tactic": "Command and Control", "confidence": 0.65},  # noqa: E501
+    "T1027": {"id": "T1027", "name": "Obfuscated Files or Information", "tactic": "Defense Evasion", "confidence": 0.6},  # noqa: E501
 }
 
 # Signature → MITRE technique ID(s). A battle chain is built by the

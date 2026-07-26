@@ -1,8 +1,7 @@
 name: Build & Push Images
-# Tag-triggered for now; add `branches: [main]` once all three Dockerfiles
-# build real services (frontend already does).
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 jobs:
   docker:

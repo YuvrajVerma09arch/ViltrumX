@@ -28,7 +28,7 @@ backend over the service token (ARCH §6) through `tools.django_client`.
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from langgraph.graph import END, StateGraph
 

@@ -1,11 +1,16 @@
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+testpaths = ["."]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = [".venv"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B"]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
 
-[tool.ruff.lint.per-file-ignores]
-# One MITRE technique per line — the table is reference data and stays far
-# more readable unwrapped than folded across three lines each.
-"tools/mitre.py" = ["E501"]
+[tool.coverage.run]
+omit = ["*/tests/*", "*/__pycache__/*"]
