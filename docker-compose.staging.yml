@@ -1,7 +1,7 @@
 # ViltrumX — staging overlay (environment separation for the rubric)
 # Usage: docker compose -f docker-compose.yml -f docker-compose.staging.yml up -d
 # Staging runs the same stack but from pushed images (ghcr.io) instead of local
-# builds, with a synthetic demo tenant seeded on boot.
+# builds. Demo data is not seeded on boot.
 services:
   postgres:
     environment:
@@ -12,6 +12,5 @@ services:
   #   image: ghcr.io/<org>/viltrumx/backend:latest
   #   environment:
   #     DJANGO_SETTINGS_MODULE: viltrumx.settings.staging
-  #     SEED_DEMO_TENANT: "true"
   # frontend:
   #   image: ghcr.io/<org>/viltrumx/frontend:latest

@@ -86,12 +86,18 @@ TEMPLATES = [
     },
 ]
 
+# Honour DATABASE_URL when provided (Docker Compose, CI, prod). The default
+# preserves the original local-dev values so `runserver` works with no env var.
+_DEFAULT_DATABASE_URL = "postgres://viltrumx:viltrumx_dev@localhost:5432/viltrumx?sslmode=disable"
 DATABASES = {
     "default": dj_database_url.config(
-        default="postgres://viltrumx:viltrumx_dev@localhost:5432/viltrumx",
-        conn_max_age=60,
+        default=_DEFAULT_DATABASE_URL,
+        conn_max_age=600,
     )
 }
+# Bound connection attempts for Postgres only — SQLite rejects connect_timeout.
+if DATABASES["default"]["ENGINE"].endswith("postgresql"):
+    DATABASES["default"].setdefault("OPTIONS", {}).setdefault("connect_timeout", 3)
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -156,3 +162,6 @@ CHANNEL_LAYERS = {
 
 # ── Internal service token (orchestrator → Django API, Week 3) ──────────────
 ORCHESTRATOR_SERVICE_TOKEN = os.environ.get("ORCHESTRATOR_SERVICE_TOKEN", "")
+
+# ── Frontend URL (for OAuth redirects) ────────────────────────────────────────
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")

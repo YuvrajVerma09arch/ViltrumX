@@ -1,8 +1,27 @@
-# ViltrumX — local development stack
+# ViltrumX — local development stack with nginx reverse proxy
 # Usage: docker compose up -d
-# Brings up the four data stores. Backend/frontend services are enabled once
-# their implementations land (see the commented blocks at the bottom).
+# Routes all traffic through nginx:80
+#   - / -> frontend (React SPA)
+#   - /api/v1/* -> backend (Django)
+#   - /webhooks/* -> backend
+#   - /ws/* -> backend (WebSocket)
+
 services:
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   postgres:
     image: postgres:16
     environment:
@@ -25,8 +44,8 @@ services:
       NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-viltrumx_dev}
       NEO4J_PLUGINS: '["graph-data-science"]'
     ports:
-      - "7474:7474"   # browser UI
-      - "7687:7687"   # bolt
+      - "7474:7474"
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
     healthcheck:
@@ -60,8 +79,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       NEO4J_URI: bolt://neo4j:7687
       QDRANT_URL: http://qdrant:6333
-    command: sh -c "python manage.py migrate && python manage.py seed_demo && daphne -b 0.0.0.0 -p 8000 viltrumx.asgi:application"
-    ports: ["8000:8000"]
+    command: sh -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 viltrumx.asgi:application"
+    # No ports exposed - nginx proxies to backend:8000
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -94,10 +113,10 @@ services:
   frontend:
     build: ./frontend
     environment:
-      VITE_API_URL: http://localhost:8000/api/v1
-    ports: ["5173:80"]
+      VITE_API_URL: http://localhost/api/v1  # Via nginx
+    # No ports exposed - nginx proxies to frontend:80
     depends_on:
-      backend: { condition: service_started }
+      - backend
 
 volumes:
   postgres_data:

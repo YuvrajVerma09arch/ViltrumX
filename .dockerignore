@@ -1,0 +1,28 @@
+# Git
+.git
+.github
+
+# Python
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+
+# Node
+**/node_modules
+**/dist
+**/.next
+
+# IDE
+.vscode
+.idea
+.DS_Store
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*

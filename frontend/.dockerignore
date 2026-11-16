@@ -1,0 +1,22 @@
+# Node
+node_modules
+dist
+.next
+*.log
+npm-debug.log*
+
+# IDE
+.vscode
+.idea
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Git
+.git
+.github
+
+# OS
+.DS_Store
