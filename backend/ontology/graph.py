@@ -15,6 +15,10 @@ TRAVERSAL_LABELS = {"has_access_to", "authenticates_to", "owns", "leaked_in_hist
 
 CRITICALITY_WEIGHT = {"crown-jewel": 1.0, "high": 0.5, "medium": 0.2, "low": 0.05}
 
+# Mirrors core.views.DEMO_TENANT_SLUG. Kept local so the ontology layer does
+# not have to import the API views module just to identify the demo tenant.
+DEMO_TENANT_SLUG = "paykraft"
+
 
 def upsert_node(tenant, external_id, label, node_type, *, criticality="medium",
                 compromised=False, meta="", x=0, y=0):
@@ -88,7 +92,14 @@ def get_inventory(tenant, category):
         tenant=tenant, node_type__in=_CATEGORY_TYPES[category]
     ).order_by("id")
     if not nodes.exists():
-        return fixture_rows
+        # Fixture rows are the pre-seeded demo tenant's fallback only. A
+        # customer with no nodes in *this* category must stay empty — even
+        # when it has nodes in other categories (the view-level guard checks
+        # for any node and would miss that case). Guard here, at the source,
+        # so every caller is protected and the demo tenant is unchanged.
+        if getattr(tenant, "slug", None) == DEMO_TENANT_SLUG:
+            return fixture_rows
+        return []
 
     # posture/kind columns come from curated fixture text keyed by entity name;
     # risk + criticality are live from the graph

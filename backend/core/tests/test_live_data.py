@@ -40,3 +40,55 @@ def test_unimplemented_connector_does_not_claim_connection(empty_client):
     from connectors.models import Connector
 
     assert not Connector.objects.filter(status="connected").exists()
+
+
+def test_empty_customer_has_no_compliance_frameworks(empty_client):
+    """The framework list is a PayKraft fixture, not a shared catalogue."""
+    response = empty_client.get("/api/v1/compliance/frameworks")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_empty_customer_connector_statuses_are_db_driven(empty_client):
+    """The catalogue is shared, but connection status must never come from fixtures."""
+    response = empty_client.get("/api/v1/connectors")
+    assert response.status_code == 200
+    rows = response.json()
+    assert rows, "the connector catalogue should still be returned"
+    assert all(row["status"] == "available" for row in rows)
+
+
+def test_inventory_fixture_fallback_is_demo_only(empty_client):
+    """A customer with nodes in one category must not receive demo fixtures in another.
+
+    The view-level guard checks for *any* ontology node, so this regression is
+    only caught by the tenant-scoped guard in ontology.graph.get_inventory.
+    """
+    from ontology.models import OntologyNode
+
+    tenant = Tenant.objects.get(slug="empty-customer")
+    OntologyNode.objects.create(
+        tenant=tenant, external_id="c-acme", label="s3://acme-data", node_type="cloud",
+    )
+
+    cloud = empty_client.get("/api/v1/inventory?category=cloud").json()
+    assert len(cloud) == 1
+    assert cloud[0]["name"] == "s3://acme-data"
+
+    for category in ("identities", "repos", "saas"):
+        response = empty_client.get(f"/api/v1/inventory?category={category}")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+def test_demo_tenant_still_gets_frameworks_and_inventory(db):
+    """The demo tenant keeps its fixtures — the viva demo must not regress."""
+    from django.core.management import call_command
+
+    call_command("seed_demo", "--reset")
+    demo = User.objects.get(username="arjun.mehta@paykraft.in")
+    api = APIClient()
+    api.force_authenticate(demo)
+
+    assert api.get("/api/v1/compliance/frameworks").json()
+    assert api.get("/api/v1/inventory?category=identities").json()

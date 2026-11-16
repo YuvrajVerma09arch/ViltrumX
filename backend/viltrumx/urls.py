@@ -2,14 +2,18 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from connectors.views import GitHubWebhookView, GitHubOAuthCallbackView, GitHubOAuthStartView
+from connectors.views import GitHubOAuthCallbackView, GitHubOAuthStartView, GitHubWebhookView
 from core import views as v
 from core import views_agent as va
 from core.serializers import CustomTokenObtainPairSerializer
 
 api_v1 = [
     # auth
-    path("auth/token", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token"),
+    path(
+        "auth/token",
+        TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer),
+        name="token",
+    ),
     path("auth/token/refresh", TokenRefreshView.as_view(), name="token-refresh"),
     path("auth/register", v.RegisterView.as_view(), name="register"),
     # command deck
@@ -43,7 +47,11 @@ api_v1 = [
     ),
     # GitHub OAuth connect flow
     path("connectors/gh/oauth/start", GitHubOAuthStartView.as_view(), name="github-oauth-start"),
-    path("connectors/gh/oauth/callback", GitHubOAuthCallbackView.as_view(), name="github-oauth-callback"),
+    path(
+        "connectors/gh/oauth/callback",
+        GitHubOAuthCallbackView.as_view(),
+        name="github-oauth-callback",
+    ),
     path("ingest/replay", v.IngestReplayView.as_view(), name="ingest-replay"),
     path(
         "ingest/scenario/<str:scenario>",

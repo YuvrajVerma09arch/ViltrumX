@@ -2,20 +2,21 @@
 """
 Standalone evaluation script - doesn't use manage.py to avoid PostgreSQL settings.
 """
-import os
 import sys
-import json
 from collections import Counter
 from pathlib import Path
+
+import django
+import numpy as np
+from django.conf import settings
+from django.core.management import call_command
 
 # Add backend to path so Django can find apps
 BACKEND_DIR = Path(__file__).resolve().parents[3]  # .../backend
 sys.path.insert(0, str(BACKEND_DIR))
 
-# Setup Django with SQLite BEFORE any imports
-import django
-from django.conf import settings
-
+# Configure Django with SQLite. The app-model imports below must come after
+# setup/migrations, hence the targeted E402 suppressions (order-dependent by design).
 if not settings.configured:
     settings.configure(
         DATABASES={
@@ -53,15 +54,12 @@ if not settings.configured:
 django.setup()
 
 # Run migrations
-from django.core.management import call_command
 call_command("migrate", verbosity=0, run_syncdb=True)
 
-# Now import models
-from connectors.models import RawEvent
-from connectors.synthetic import SCENARIOS, BLR_IPS
-from detection.features import build_context, featurize_with_context
-
-import numpy as np
+# App models require django.setup()/migrations to have run first (intentional E402)
+from connectors.models import RawEvent  # noqa: E402
+from connectors.synthetic import BLR_IPS, SCENARIOS  # noqa: E402
+from detection.features import build_context, featurize_with_context  # noqa: E402
 
 MODEL_DIR = Path(__file__).resolve().parent.parent / "models_store"
 MODEL_DIR.mkdir(exist_ok=True)
@@ -102,8 +100,8 @@ def _insider_labels(events):
 
 def train_models(X_train, y_train, insider_train):
     import joblib
-    from sklearn.ensemble import IsolationForest, RandomForestClassifier
     import xgboost as xgb
+    from sklearn.ensemble import IsolationForest, RandomForestClassifier
 
     print("Training Isolation Forest...")
     iso = IsolationForest(n_estimators=200, contamination=0.08, random_state=42)
@@ -135,12 +133,14 @@ def train_models(X_train, y_train, insider_train):
 
 
 def eval_classifier(name, model, X_test, y_test):
-    from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+    from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
     X_arr = np.array(X_test)
     y_arr = np.array(y_test)
     y_pred = model.predict(X_arr)
 
-    prec, rec, f1, sup = precision_recall_fscore_support(y_arr, y_pred, average=None, zero_division=0)
+    prec, rec, f1, sup = precision_recall_fscore_support(
+        y_arr, y_pred, average=None, zero_division=0
+    )
     macro = precision_recall_fscore_support(y_arr, y_pred, average="macro", zero_division=0)
     weighted = precision_recall_fscore_support(y_arr, y_pred, average="weighted", zero_division=0)
     cm = confusion_matrix(y_arr, y_pred)
@@ -152,7 +152,12 @@ def eval_classifier(name, model, X_test, y_test):
     print(f"  Confusion Matrix:\n{cm}")
 
     return {
-        "per_class": {"precision": prec.tolist(), "recall": rec.tolist(), "f1": f1.tolist(), "support": sup.tolist()},
+        "per_class": {
+            "precision": prec.tolist(),
+            "recall": rec.tolist(),
+            "f1": f1.tolist(),
+            "support": sup.tolist(),
+        },
         "macro": {"precision": macro[0], "recall": macro[1], "f1": macro[2]},
         "weighted": {"precision": weighted[0], "recall": weighted[1], "f1": weighted[2]},
         "confusion_matrix": cm.tolist(),
@@ -160,23 +165,30 @@ def eval_classifier(name, model, X_test, y_test):
 
 
 def eval_isolation(model, X_test, y_test):
-    from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+    from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
     X_arr = np.array(X_test)
     y_arr = np.array(y_test)
     raw_pred = model.predict(X_arr)
     y_pred = (raw_pred == -1).astype(int)
 
-    prec, rec, f1, sup = precision_recall_fscore_support(y_arr, y_pred, average=None, zero_division=0)
+    prec, rec, f1, sup = precision_recall_fscore_support(
+        y_arr, y_pred, average=None, zero_division=0
+    )
     macro_f1 = precision_recall_fscore_support(y_arr, y_pred, average="macro", zero_division=0)[2]
     cm = confusion_matrix(y_arr, y_pred)
 
-    print(f"\nIsolation Forest (anomaly detection):")
+    print("\nIsolation Forest (anomaly detection):")
     print(f"  Per-class:  prec={prec}  rec={rec}  f1={f1}  support={sup}")
     print(f"  Macro F1:   {macro_f1:.4f}")
     print(f"  Confusion Matrix:\n{cm}")
 
     return {
-        "per_class": {"precision": prec.tolist(), "recall": rec.tolist(), "f1": f1.tolist(), "support": sup.tolist()},
+        "per_class": {
+            "precision": prec.tolist(),
+            "recall": rec.tolist(),
+            "f1": f1.tolist(),
+            "support": sup.tolist(),
+        },
         "macro_f1": macro_f1,
         "confusion_matrix": cm.tolist(),
     }
@@ -228,7 +240,9 @@ def main():
         report["xgboost"] = eval_classifier("XGBoost (attack detection)", xgb_model, X_test, y_test)
 
     if rf_model is not None:
-        report["random_forest"] = eval_classifier("Random Forest (insider threat)", rf_model, X_test, insider_test)
+        report["random_forest"] = eval_classifier(
+            "Random Forest (insider threat)", rf_model, X_test, insider_test
+        )
 
     report["isolation_forest"] = eval_isolation(iso_model, X_test, y_test)
 

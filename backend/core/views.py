@@ -5,6 +5,7 @@ and Week-4 reports. Response shapes match frontend/src/data/mock.ts exactly
 (camelCase — the built frontend depends on them).
 """
 
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -13,7 +14,6 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from actions import executor
 from actions.models import Action, AutonomyPolicy
-from django.utils import timezone
 from core import demo_data
 from core.models import AgentState, FeedLine, Incident, Membership
 from core.serializers import (
@@ -46,7 +46,11 @@ class RegisterView(APIView):
         refresh = RefreshToken.for_user(user)
         return Response(
             {
-                "user": {"id": user.id, "email": user.email, "name": result["membership"].display_name},
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": result["membership"].display_name,
+                },
                 "tenant": {"id": tenant.id, "name": tenant.name, "slug": tenant.slug},
                 "access": str(refresh.access_token),
                 "refresh": str(refresh),
@@ -323,6 +327,10 @@ class PurpleRunView(TenantAPIView):
 
 class FrameworksView(TenantAPIView):
     def get(self, request):
+        # The framework list is a PayKraft demo fixture. A customer tenant
+        # must not inherit the demo org's compliance posture.
+        if not _is_demo_tenant(self.tenant):
+            return Response([])
         return Response(demo_data.FRAMEWORKS)
 
 
@@ -351,8 +359,9 @@ class ComplianceExportView(TenantAPIView):
 class ComplianceExportDownloadView(TenantAPIView):
     """Download the actual PDF file for a compliance export."""
     def get(self, request, framework_id: str):
-        from reports.compliance import generate_pdf
         from django.http import FileResponse
+
+        from reports.compliance import generate_pdf
 
         pdf_buffer = generate_pdf(self.tenant, framework_id)
         filename = f"{framework_id}-{self.tenant.slug}-{timezone.now().strftime('%Y%m%d')}.pdf"

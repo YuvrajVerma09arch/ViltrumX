@@ -2,8 +2,6 @@
 GitHub webhook receiver + audit-log poller (the one real connector).
 """
 
-from django.http import HttpResponseRedirect
-from django.shortcuts import redirect
 import hashlib
 import hmac
 import logging
@@ -13,12 +11,13 @@ from urllib.parse import urlencode
 
 import requests
 from django.conf import settings
+from django.http import HttpResponseRedirect
 from django.utils import timezone
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from connectors.models import Connector, OAuthState, RawEvent
+from connectors.models import Connector, OAuthState
 from connectors.tasks import ingest_event
 from core.models import Tenant
 from core.tenancy import tenant_for
@@ -41,8 +40,12 @@ def _verify_signature(body: bytes, header: str | None) -> bool:
 def _get_github_oauth_config():
     """Returns (client_id, client_secret, redirect_uri) from settings/env."""
     client_id = getattr(settings, "GITHUB_CLIENT_ID", os.environ.get("GITHUB_CLIENT_ID", ""))
-    client_secret = getattr(settings, "GITHUB_CLIENT_SECRET", os.environ.get("GITHUB_CLIENT_SECRET", ""))
-    redirect_uri = getattr(settings, "GITHUB_REDIRECT_URI", os.environ.get("GITHUB_REDIRECT_URI", ""))
+    client_secret = getattr(
+        settings, "GITHUB_CLIENT_SECRET", os.environ.get("GITHUB_CLIENT_SECRET", "")
+    )
+    redirect_uri = getattr(
+        settings, "GITHUB_REDIRECT_URI", os.environ.get("GITHUB_REDIRECT_URI", "")
+    )
     return client_id, client_secret, redirect_uri
 
 
@@ -55,6 +58,7 @@ def _is_github_configured():
 def _store_oauth_state(state: str, tenant_id: int):
     """Persist OAuth state to DB (not session) so it survives the GitHub redirect."""
     from datetime import timedelta
+
     from django.utils import timezone
 
     OAuthState.objects.create(
@@ -123,7 +127,12 @@ class GitHubOAuthStartView(APIView):
 
         # Development mode: if GitHub OAuth not configured, return a mock auth_url
         if not _is_github_configured():
-            redirect_uri = getattr(settings, "GITHUB_REDIRECT_URI", os.environ.get("GITHUB_REDIRECT_URI", "http://localhost:8000/api/v1/connectors/gh/oauth/callback"))
+            default_redirect = "http://localhost:8000/api/v1/connectors/gh/oauth/callback"
+            redirect_uri = getattr(
+                settings,
+                "GITHUB_REDIRECT_URI",
+                os.environ.get("GITHUB_REDIRECT_URI", default_redirect),
+            )
             mock_auth_url = f"{redirect_uri}?code=demo-code-{state}&state={state}"
             return Response({"auth_url": mock_auth_url, "mock": True})
 
@@ -189,14 +198,20 @@ class GitHubOAuthCallbackView(APIView):
             # Fetch org info to identify the GitHub org
             org_resp = requests.get(
                 "https://api.github.com/user/orgs",
-                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/vnd.github+json",
+                },
                 timeout=10,
             )
             orgs = org_resp.json()
             if not orgs:
                 user_resp = requests.get(
                     "https://api.github.com/user",
-                    headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/vnd.github+json",
+                    },
                     timeout=10,
                 )
                 user = user_resp.json()
@@ -207,7 +222,10 @@ class GitHubOAuthCallbackView(APIView):
             if org_login:
                 inst_resp = requests.get(
                     f"https://api.github.com/orgs/{org_login}/installation",
-                    headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/vnd.github+json",
+                    },
                     timeout=10,
                 )
                 if inst_resp.status_code == 200:

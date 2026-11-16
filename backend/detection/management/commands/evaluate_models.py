@@ -19,44 +19,15 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from collections import Counter
 
-from django.conf import settings
-from django.core.management import call_command
 from django.core.management.base import BaseCommand
-from django.db import connections
 
-# Override DB to SQLite in-memory for standalone evaluation
-if not settings.configured:
-    settings.configure(
-        DATABASES={
-            "default": {
-                "ENGINE": "django.db.backends.sqlite3",
-                "NAME": ":memory:",
-            }
-        },
-        INSTALLED_APPS=[
-            "django.contrib.auth",
-            "django.contrib.contenttypes",
-            "django.contrib.sessions",
-            "core",
-            "connectors",
-            "detection",
-        ],
-        USE_TZ=True,
-        SECRET_KEY="eval-only",
-    )
-
-import django
-django.setup()
-
-# Run migrations to create tables in SQLite
-call_command("migrate", verbosity=0, run_syncdb=True)
-
-# Now imports work with the overridden settings
-from connectors.models import RawEvent
-from connectors.synthetic import SCENARIOS
+# NOTE: this is a real Django management command. Django configures settings,
+# sets up apps and connects to the (already migrated) database before handle()
+# runs, so no standalone shim (settings.configure / django.setup / "migrate")
+# belongs here. Keep module import side-effect free: model imports happen lazily
+# inside handle()/helpers. See evaluate_models_standalone.py for standalone use.
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models_store")
 MODEL_DIR = os.path.abspath(MODEL_DIR)
@@ -91,6 +62,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **opts):
+        # Imported lazily so importing this module has no side effects and Django
+        # is fully initialised (apps ready, DB configured) before models load.
+        from connectors.models import RawEvent
+
         test_size = opts["test_size"]
         cv_folds = opts["cv"]
         save_path = opts["save_report"]
@@ -192,6 +167,8 @@ class Command(BaseCommand):
         return labels
 
     def _seed(self):
+        from connectors.models import RawEvent
+        from connectors.synthetic import SCENARIOS
         from core.models import Tenant
         tenant = Tenant.objects.first()
         if tenant is None:
@@ -262,12 +239,11 @@ class Command(BaseCommand):
     # ── Evaluation ────────────────────────────────────────────────────────────
 
     def _eval_classifier(self, name, model, X, y):
-        from sklearn.metrics import (
-            precision_recall_fscore_support,
-            confusion_matrix,
-            classification_report,
-        )
         import numpy as np
+        from sklearn.metrics import (
+            confusion_matrix,
+            precision_recall_fscore_support,
+        )
 
         X_arr = np.array(X)
         y_arr = np.array(y)
@@ -304,7 +280,7 @@ class Command(BaseCommand):
 
     def _eval_isolation(self, model, X, y):
         import numpy as np
-        from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+        from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
         X_arr = np.array(X)
         y_arr = np.array(y)
@@ -320,7 +296,7 @@ class Command(BaseCommand):
         )[2]
         cm = confusion_matrix(y_arr, y_pred)
 
-        self.stdout.write(f"\nIsolation Forest (anomaly detection):")
+        self.stdout.write("\nIsolation Forest (anomaly detection):")
         self.stdout.write(f"  Per-class:  prec={prec}  rec={rec}  f1={f1}  support={sup}")
         self.stdout.write(f"  Macro F1:   {macro_f1:.4f}")
         self.stdout.write(f"  Confusion Matrix:\n{cm}")
@@ -338,7 +314,7 @@ class Command(BaseCommand):
 
     def _eval_hdbscan(self, model, X, y):
         import numpy as np
-        from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+        from sklearn.metrics import confusion_matrix, precision_recall_fscore_support
 
         X_arr = np.array(X)
         y_arr = np.array(y)
@@ -354,7 +330,7 @@ class Command(BaseCommand):
         )[2]
         cm = confusion_matrix(y_arr, y_pred)
 
-        self.stdout.write(f"\nHDBSCAN (noise-gate clustering):")
+        self.stdout.write("\nHDBSCAN (noise-gate clustering):")
         self.stdout.write(f"  Per-class:  prec={prec}  rec={rec}  f1={f1}  support={sup}")
         self.stdout.write(f"  Macro F1:   {macro_f1:.4f}")
         self.stdout.write(f"  Confusion Matrix:\n{cm}")
@@ -384,8 +360,8 @@ class Command(BaseCommand):
 
     def _run_cv(self, cv_folds, X, y, insider_y):
         import numpy as np
-        from sklearn.model_selection import StratifiedKFold
         from sklearn.metrics import precision_recall_fscore_support
+        from sklearn.model_selection import StratifiedKFold
 
         X_arr = np.array(X)
         y_arr = np.array(y)
@@ -421,4 +397,6 @@ class Command(BaseCommand):
                     insider_arr[val_idx], pred, average="weighted", zero_division=0
                 )
                 rf_f1s.append(f1)
-            self.stdout.write(f"  Random Forest weighted F1: {np.mean(rf_f1s):.4f} ± {np.std(rf_f1s):.4f}")
+            self.stdout.write(
+                f"  Random Forest weighted F1: {np.mean(rf_f1s):.4f} ± {np.std(rf_f1s):.4f}"
+            )

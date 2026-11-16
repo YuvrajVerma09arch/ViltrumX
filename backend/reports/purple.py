@@ -135,11 +135,16 @@ def _update_readiness(tenant):
     from reports.models import PurpleScenario, ReadinessScore
 
     scenarios = PurpleScenario.objects.filter(tenant=tenant)
-    if not scenarios.exists():
-        return
     passed = scenarios.filter(result="passed").count()
     total = scenarios.exclude(result="scheduled").count()
-    score = int(round(passed / total * 100)) if total else 94
+    if not total:
+        # No scenario has actually run yet (either the tenant has none, or all
+        # are still "scheduled"). Do NOT fabricate a readiness score: a bogus
+        # 94%/100% (or even a 0%) would surface to an empty customer tenant as
+        # real data. Skipping the row lets ReadinessView return [] and the UI
+        # show its "no readiness data yet" empty state instead.
+        return
+    score = int(round(passed / total * 100))
 
     week = timezone.now().strftime("W%V")
     ReadinessScore.objects.update_or_create(

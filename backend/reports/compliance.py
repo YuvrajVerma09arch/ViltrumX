@@ -6,18 +6,19 @@ CERT-In is the primary: 6 legally required fields, pulled from the
 provenance trace, bilingual EN/HI.
 """
 
-from django.utils import timezone
-from io import BytesIO
 import os
+from io import BytesIO
 
-from core import demo_data
+from django.utils import timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+from core import demo_data
 
 # Register Unicode font for Hindi/Devanagari support
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
@@ -79,21 +80,34 @@ def generate_pdf(tenant, framework_id: str) -> BytesIO:
         topMargin=2*cm, bottomMargin=2*cm
     )
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=16, spaceAfter=12)
-    heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=12, spaceAfter=6, spaceBefore=12)
-    body_style = ParagraphStyle('CustomBody', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14)
-    hindi_style = ParagraphStyle('HindiBody', parent=body_style, fontName=HINDI_FONT, fontSize=10, spaceAfter=4, leading=14, textColor=colors.grey)
+    title_style = ParagraphStyle(
+        'CustomTitle', parent=styles['Title'], fontSize=16, spaceAfter=12
+    )
+    heading_style = ParagraphStyle(
+        'CustomHeading', parent=styles['Heading2'], fontSize=12,
+        spaceAfter=6, spaceBefore=12,
+    )
+    body_style = ParagraphStyle(
+        'CustomBody', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14
+    )
+    hindi_style = ParagraphStyle(
+        'HindiBody', parent=body_style, fontName=HINDI_FONT, fontSize=10,
+        spaceAfter=4, leading=14, textColor=colors.grey,
+    )
 
     story = []
 
     # Title
     story.append(Paragraph(content.get("framework", "Compliance Report"), title_style))
     story.append(Paragraph(f"Tenant: {tenant.name} ({tenant.slug})", body_style))
-    story.append(Paragraph(f"Generated: {timezone.now().strftime('%d %b %Y %H:%M IST')}", body_style))
+    generated = timezone.now().strftime('%d %b %Y %H:%M IST')
+    story.append(Paragraph(f"Generated: {generated}", body_style))
     story.append(Spacer(1, 12))
 
     if framework_id == "certin":
-        story.append(Paragraph("CERT-In Directions 2022 — Cyber Security Incident Report", heading_style))
+        story.append(
+            Paragraph("CERT-In Directions 2022 — Cyber Security Incident Report", heading_style)
+        )
         story.append(Spacer(1, 6))
         fields = content.get("fields", {})
         for key, label in [
@@ -116,7 +130,9 @@ def generate_pdf(tenant, framework_id: str) -> BytesIO:
         story.append(Paragraph(content.get("hindi_summary", ""), hindi_style))
 
     elif framework_id == "dpdp":
-        story.append(Paragraph("Digital Personal Data Protection Act 2023 — Evidence Pack", heading_style))
+        story.append(
+            Paragraph("Digital Personal Data Protection Act 2023 — Evidence Pack", heading_style)
+        )
         story.append(Spacer(1, 6))
         for key, label in [
             ("data_fiduciary", "Data Fiduciary"),
