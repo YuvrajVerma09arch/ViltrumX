@@ -1,21 +1,20 @@
 from django.contrib import admin
 from django.urls import include, path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from connectors.views import GitHubOAuthCallbackView, GitHubOAuthStartView, GitHubWebhookView
 from core import views as v
 from core import views_agent as va
-from core.serializers import CustomTokenObtainPairSerializer
 
 api_v1 = [
-    # auth
-    path(
-        "auth/token",
-        TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer),
-        name="token",
-    ),
+    # auth — a session is minted ONLY after an emailed code is verified.
+    # The old password-only /auth/token endpoint is deliberately gone.
     path("auth/token/refresh", TokenRefreshView.as_view(), name="token-refresh"),
     path("auth/register", v.RegisterView.as_view(), name="register"),
+    path("auth/verify", v.VerifyView.as_view(), name="verify"),
+    path("auth/login-challenge", v.LoginChallengeView.as_view(), name="login-challenge"),
+    path("auth/login-verify", v.LoginVerifyView.as_view(), name="login-verify"),
+    path("auth/resend", v.ResendView.as_view(), name="resend"),
     # command deck
     path("agents/status", v.AgentStatusView.as_view(), name="agents-status"),
     path("feed", v.ActivityFeedView.as_view(), name="feed"),

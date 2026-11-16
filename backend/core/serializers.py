@@ -7,10 +7,18 @@ frontend types in the same PR.
 """
 
 from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from actions.models import Action, ProvenanceStep
-from core.models import AgentState, AttackStep, EvidenceItem, FeedLine, Incident, Membership, Tenant
+from core.models import (
+    AgentState,
+    AttackStep,
+    EvidenceItem,
+    FeedLine,
+    Incident,
+    Membership,
+    Tenant,
+    VerificationCode,
+)
 
 
 class IncidentSerializer(serializers.ModelSerializer):
@@ -88,7 +96,11 @@ class MemberSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.Serializer):
-    """Founder signup: creates User + Tenant + Owner Membership in one call."""
+    """Founder signup: creates an inactive User + Tenant + Owner Membership.
+
+    The account stays inactive until the emailed signup code is verified — no
+    JWT is issued by registration.
+    """
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True, min_length=8)
     full_name = serializers.CharField(max_length=120)
@@ -103,9 +115,10 @@ class RegisterSerializer(serializers.Serializer):
     def validate_email(self, value):
         from django.contrib.auth import get_user_model
         User = get_user_model()
-        if User.objects.filter(email__iexact=value).exists():
+        email = value.strip().lower()
+        if User.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("Email already registered.")
-        return value
+        return email
 
     def create(self, validated_data):
         from django.contrib.auth import get_user_model
@@ -118,6 +131,7 @@ class RegisterSerializer(serializers.Serializer):
                 username=validated_data["email"],
                 email=validated_data["email"],
                 password=validated_data["password"],
+                is_active=False,
             )
             tenant = Tenant.objects.create(
                 name=validated_data["tenant_name"],
@@ -133,21 +147,42 @@ class RegisterSerializer(serializers.Serializer):
         return {"user": user, "tenant": tenant, "membership": membership}
 
 
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Extends JWT login to include user profile + tenant in the response,
-    so the frontend knows which org they belong to without a follow-up call."""
+class VerifySerializer(serializers.Serializer):
+    """Step 2 of signup: exchange {email, code} for a session."""
+
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=20, trim_whitespace=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class LoginChallengeSerializer(serializers.Serializer):
+    """Step 1 of login: check the password, then email a one-time code."""
+
+    email = serializers.EmailField(required=False)
+    username = serializers.CharField(required=False)  # legacy clients
+    password = serializers.CharField(write_only=True)
 
     def validate(self, attrs):
-        data = super().validate(attrs)
-        user = self.user
-        membership = Membership.objects.filter(user=user).order_by("id").first()
-        if membership:
-            data["user"] = {
-                "id": user.id, "email": user.email, "name": membership.display_name,
-            }
-            data["tenant"] = {
-                "id": membership.tenant.id,
-                "name": membership.tenant.name,
-                "slug": membership.tenant.slug,
-            }
-        return data
+        identifier = (attrs.get("email") or attrs.get("username") or "").strip().lower()
+        if not identifier:
+            raise serializers.ValidationError({"email": "Email is required."})
+        attrs["email"] = identifier
+        return attrs
+
+
+class LoginVerifySerializer(LoginChallengeSerializer):
+    """Step 2 of login: the code alone is not enough — re-check the password."""
+
+    code = serializers.CharField(max_length=20, trim_whitespace=True)
+
+
+class ResendSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    purpose = serializers.ChoiceField(
+        choices=VerificationCode.PURPOSE_CHOICES, default="signup"
+    )
+
+    def validate_email(self, value):
+        return value.strip().lower()

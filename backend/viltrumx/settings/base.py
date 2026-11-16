@@ -135,6 +135,28 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
 }
 
+# ── Email / owner verification ───────────────────────────────────────────────
+# Safe dev default: the console backend prints mail instead of needing SMTP, so
+# signup/login flows work offline. Production supplies EMAIL_BACKEND + SMTP
+# credentials via the environment; no real secrets live in this file.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "25"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "false").lower() in ("1", "true", "yes")
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "ViltrumX <no-reply@viltrumx.local>")
+
+# One-time code lifecycle (6-digit codes, hashed at rest, single use).
+VERIFICATION_CODE_TTL_SECONDS = int(os.environ.get("VERIFICATION_CODE_TTL_SECONDS", "600"))
+VERIFICATION_MAX_ATTEMPTS = int(os.environ.get("VERIFICATION_MAX_ATTEMPTS", "5"))
+VERIFICATION_RESEND_COOLDOWN_SECONDS = int(
+    os.environ.get("VERIFICATION_RESEND_COOLDOWN_SECONDS", "60")
+)
+VERIFICATION_MAX_RESENDS = int(os.environ.get("VERIFICATION_MAX_RESENDS", "3"))
+
 # ── Celery / Redis ───────────────────────────────────────────────────────────
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 CELERY_BROKER_URL = REDIS_URL

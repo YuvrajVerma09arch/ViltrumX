@@ -137,21 +137,58 @@ export const api = {
     request<T>(path, { method: 'PUT', body: JSON.stringify(body ?? {}) }),
 }
 
-/* ── auth flows ──────────────────────────────────────────────────────── */
+/* ── auth flows — owner verification ────────────────────────────────────
+ *
+ * Signup and signin are now two-step. Step 1 (register / login-challenge /
+ * resend) only asks the backend to email a 6-digit code and returns NO tokens.
+ * Step 2 (verify / login-verify) exchanges the code for a real JWT session.
+ * The single place that persists tokens + profile is `saveSession`, so it is
+ * impossible to end up "logged in" before the code has been checked.
+ * ─────────────────────────────────────────────────────────────────────── */
 
-export async function login(username: string, password: string) {
-  const res = await fetch(`${BASE}/auth/token`, {
+export type AuthPurpose = 'signup' | 'login'
+
+export type Challenge = {
+  email: string
+  purpose: AuthPurpose
+}
+
+export type VerifiedSession = {
+  access: string
+  refresh: string
+  user: { id: number; email: string; name: string }
+  tenant: { id: number; name: string; slug: string }
+}
+
+/** Pull a human-readable message out of a DRF error body (string, list, or field-mapped). */
+function authErrorMessage(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback
+  const b = body as Record<string, unknown>
+  const detail = b.detail ?? b.message ?? b.error
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail) && typeof detail[0] === 'string') return detail[0]
+  for (const value of Object.values(b)) {
+    if (typeof value === 'string') return value
+    if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  }
+  return fallback
+}
+
+async function postAuth<T>(path: string, body: unknown, fallback: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(body ?? {}),
   })
+  const payload: unknown = res.status === 204 ? {} : await res.json().catch(() => ({}))
   if (!res.ok) {
-    throw new ApiError(
-      res.status === 401 ? 'Invalid email or password.' : 'Sign-in failed.',
-      res.status,
-    )
+    throw new ApiError(authErrorMessage(payload, fallback), res.status)
   }
-  const body = (await res.json()) as { access: string; refresh: string; user?: { id: number; email: string; name: string }; tenant?: { id: number; name: string; slug: string } }
+  return payload as T
+}
+
+/** The ONLY place a verification result becomes a logged-in session. */
+function saveSession(body: VerifiedSession): VerifiedSession {
   auth.save(body.access, body.refresh)
   if (body.user && body.tenant) {
     auth.saveProfile(body.user, body.tenant)
@@ -159,30 +196,42 @@ export async function login(username: string, password: string) {
   return body
 }
 
-export function logout() {
-  auth.clear()
-}
-
-export async function register(data: {
+/** Step 1a — signup: create User + Tenant + Owner, email a code, issue NO tokens. */
+export function register(data: {
   email: string
   password: string
   full_name: string
   tenant_name: string
   tenant_slug: string
-}) {
-  const res = await fetch(`${BASE}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new ApiError(body.detail || 'Registration failed.', res.status)
-  }
-  const body = (await res.json()) as { access: string; refresh: string; user: { id: number; email: string; name: string }; tenant: { id: number; name: string; slug: string } }
-  auth.save(body.access, body.refresh)
-  auth.saveProfile(body.user, body.tenant)
-  return body
+}): Promise<Challenge> {
+  return postAuth<Challenge>('/auth/register', data, 'Registration failed.')
+}
+
+/** Step 1b — signin: validate password, email a code, issue NO tokens. */
+export function loginChallenge(email: string, password: string): Promise<Challenge> {
+  return postAuth<Challenge>('/auth/login-challenge', { email, password }, 'Sign-in failed.')
+}
+
+/** Backward-compatible alias for older imports (now challenge-only, no tokens). */
+export const login = loginChallenge
+
+/** Step 2a — signup verification: exchange the code for a JWT session. */
+export function verify(email: string, code: string): Promise<VerifiedSession> {
+  return postAuth<VerifiedSession>('/auth/verify', { email, code }, 'Verification failed.').then(saveSession)
+}
+
+/** Step 2b — login verification: exchange password + code for a JWT session. */
+export function loginVerify(email: string, password: string, code: string): Promise<VerifiedSession> {
+  return postAuth<VerifiedSession>('/auth/login-verify', { email, password, code }, 'Verification failed.').then(saveSession)
+}
+
+/** Ask the backend to send (or re-send) a verification code. */
+export function resend(email: string, purpose: AuthPurpose): Promise<Challenge> {
+  return postAuth<Challenge>('/auth/resend', { email, purpose }, "Couldn't send the code.")
+}
+
+export function logout() {
+  auth.clear()
 }
 
 /* ── typed endpoint map ──────────────────────────────────────────────── */
@@ -198,7 +247,7 @@ export const endpoints = {
   inventory: (category: string) => api.get(`/inventory?category=${category}`),
   connectors: () => api.get('/connectors'),
   connect: (id: string) => api.post(`/connectors/${id}/connect`),
-  githubOAuthStart: () => api.get('/connectors/gh/oauth/start'),
+  githubOAuthStart: () => api.get<{ auth_url: string }>('/connectors/gh/oauth/start'),
   replay: (scenario = 'inc-042') => api.post('/ingest/replay', { scenario }),
   actions: () => api.get('/actions'),
   actionTrace: (id: string) => api.get(`/actions/${id}/trace`),

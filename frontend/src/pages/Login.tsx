@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { Button } from '../components/ui'
-import { login, register } from '../lib/api'
+import { loginChallenge, register, type AuthPurpose } from '../lib/api'
 
 export default function Login() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
@@ -42,6 +42,8 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
+      // Step 1 only requests a code. NO token is stored here — the session is
+      // created exclusively by Verify.tsx after the 6-digit code checks out.
       if (mode === 'signup') {
         await register({
           email,
@@ -50,11 +52,17 @@ export default function Login() {
           tenant_name: tenantName.trim(),
           tenant_slug: slugify(tenantName),
         })
-        navigate('/app/onboarding')
       } else {
-        await login(email, password)
-        navigate('/app')
+        await loginChallenge(email, password)
       }
+      const purpose: AuthPurpose = mode === 'signup' ? 'signup' : 'login'
+      navigate(
+        `/verify?email=${encodeURIComponent(email.trim())}&purpose=${purpose}`,
+        // Carry the password out of the URL: login-verify needs it, but it must
+        // never appear in a query string or browser history. Verify.tsx falls
+        // back to asking for it again if router state is unavailable.
+        { state: mode === 'signin' ? { password } : null },
+      )
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Sign-in failed — is the API running?',
@@ -175,8 +183,11 @@ export default function Login() {
             </div>
             <Button type="submit" disabled={loading} className="w-full">
               {loading && <Loader2 size={15} className="animate-spin" aria-hidden />}
-              {mode === 'signin' ? 'Sign in' : 'Create org & connect sources'}
+              {mode === 'signin' ? 'Send sign-in code' : 'Create org & send code'}
             </Button>
+            <p className="mt-3 text-center text-xs text-ink-3">
+              We'll email you a 6-digit code to confirm it's really you — no session is created until you enter it.
+            </p>
           </form>
 
           <p className="mt-5 text-center text-sm text-ink-2">

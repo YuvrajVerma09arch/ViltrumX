@@ -5,6 +5,14 @@ and Week-4 reports. Response shapes match frontend/src/data/mock.ts exactly
 (camelCase — the built frontend depends on them).
 """
 
+import secrets
+from datetime import timedelta
+
+from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
+from django.core import mail as django_mail
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -15,7 +23,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from actions import executor
 from actions.models import Action, AutonomyPolicy
 from core import demo_data
-from core.models import AgentState, FeedLine, Incident, Membership
+from core.models import AgentState, FeedLine, Incident, Membership, VerificationCode
 from core.serializers import (
     ActionSerializer,
     AgentStateSerializer,
@@ -23,40 +31,278 @@ from core.serializers import (
     EvidenceSerializer,
     FeedLineSerializer,
     IncidentSerializer,
+    LoginChallengeSerializer,
+    LoginVerifySerializer,
     MemberSerializer,
     ProvenanceStepSerializer,
     RegisterSerializer,
+    ResendSerializer,
+    VerifySerializer,
 )
 from core.tenancy import tenant_for
 
 
+class VerificationEmailError(Exception):
+    """The one-time code could not be delivered — do not leave a pending challenge."""
+
+
+def _send_verification_email(email: str, raw_code: str, purpose: str) -> None:
+    """Send the plaintext code over email. Never log or persist the plaintext."""
+    label = "signup" if purpose == "signup" else "login"
+    minutes = settings.VERIFICATION_CODE_TTL_SECONDS // 60
+    try:
+        django_mail.send_mail(
+            subject=f"Your ViltrumX {label} verification code",
+            message=(
+                f"Your ViltrumX verification code is {raw_code}.\n\n"
+                f"It expires in {minutes} minute(s) and can be used once. "
+                "If you did not request it, you can ignore this email."
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[email],
+            fail_silently=False,
+        )
+    except Exception as exc:
+        raise VerificationEmailError("verification email delivery failed") from exc
+
+
+def _issue_verification_code(email: str, purpose: str, resend_count: int = 0):
+    """Create a fresh hashed code, superseding any pending one for this email.
+
+    Callers wrap this in ``transaction.atomic()`` so a mail failure rolls back
+    both the new code and the invalidation of the previous one.
+    """
+    email = (email or "").strip().lower()
+    now = timezone.now()
+    VerificationCode.objects.filter(
+        email=email, purpose=purpose, consumed_at__isnull=True
+    ).update(consumed_at=now)
+    raw_code = f"{secrets.randbelow(1_000_000):06d}"
+    code = VerificationCode.objects.create(
+        email=email,
+        code_hash=make_password(raw_code),
+        purpose=purpose,
+        expires_at=now + timedelta(seconds=settings.VERIFICATION_CODE_TTL_SECONDS),
+        resend_count=resend_count,
+    )
+    return code, raw_code
+
+
+def _latest_code(email: str, purpose: str):
+    return (
+        VerificationCode.objects.filter(email=(email or "").strip().lower(), purpose=purpose)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+
+
+def _consume_code(email: str, purpose: str, raw_code: str):
+    """Atomically validate + consume a code. Returns (code, error_message)."""
+    with transaction.atomic():
+        code = (
+            VerificationCode.objects.select_for_update()
+            .filter(email=(email or "").strip().lower(), purpose=purpose)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if code is None:
+            return None, "No verification challenge found. Request a new code."
+        if code.consumed_at is not None:
+            return None, "This verification code has already been used. Request a new one."
+        if code.is_expired:
+            return None, "This verification code has expired. Request a new one."
+        if code.is_locked:
+            return None, "Too many incorrect attempts. Request a new code."
+        if not code.check_code(raw_code):
+            code.attempts += 1
+            code.save(update_fields=["attempts"])
+            remaining = max(settings.VERIFICATION_MAX_ATTEMPTS - code.attempts, 0)
+            if remaining == 0:
+                return None, "Too many incorrect attempts. Request a new code."
+            return None, f"Incorrect verification code. {remaining} attempt(s) remaining."
+        code.consumed_at = timezone.now()
+        code.save(update_fields=["consumed_at"])
+        return code, None
+
+
+def _token_payload(user) -> dict:
+    """Same access/refresh/user/tenant shape the pre-verification login returned."""
+    membership = Membership.objects.filter(user=user).order_by("id").first()
+    refresh = RefreshToken.for_user(user)
+    payload = {
+        "access": str(refresh.access_token),
+        "refresh": str(refresh),
+        "user": {"id": user.id, "email": user.email, "name": user.username},
+    }
+    if membership:
+        payload["user"]["name"] = membership.display_name
+        payload["tenant"] = {
+            "id": membership.tenant.id,
+            "name": membership.tenant.name,
+            "slug": membership.tenant.slug,
+        }
+    return payload
+
+
+def _challenge_payload(code, email: str, purpose: str) -> dict:
+    return {
+        "challengeId": str(code.challenge_id),
+        "email": email.strip().lower(),
+        "purpose": purpose,
+    }
+
+
 class RegisterView(APIView):
-    """Public: founder signup → User + Tenant + Owner Membership + JWT."""
+    """Public: founder signup → inactive User + Tenant + Owner + emailed code.
+
+    No JWT is issued here. The account is activated only by ``VerifyView``.
+    """
 
     permission_classes = [AllowAny]
 
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        result = serializer.save()
-        user = result["user"]
-        tenant = result["tenant"]
+        email = serializer.validated_data["email"]
+        try:
+            with transaction.atomic():
+                serializer.save()
+                code, raw_code = _issue_verification_code(email, "signup")
+                _send_verification_email(email, raw_code, "signup")
+        except VerificationEmailError:
+            return Response(
+                {"detail": "Could not deliver the verification email. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(_challenge_payload(code, email, "signup"), status=status.HTTP_202_ACCEPTED)
 
-        # Issue JWT for immediate login
-        refresh = RefreshToken.for_user(user)
-        return Response(
-            {
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "name": result["membership"].display_name,
-                },
-                "tenant": {"id": tenant.id, "name": tenant.name, "slug": tenant.slug},
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-            },
-            status=status.HTTP_201_CREATED,
-        )
+
+class VerifyView(APIView):
+    """Public: exchange an emailed signup code for a session and activate the owner."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = VerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        code, error = _consume_code(email, "signup", serializer.validated_data["code"])
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+
+        User = get_user_model()
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None:
+            return Response(
+                {"detail": "No verification challenge found. Request a new code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            if not user.is_active:
+                user.is_active = True
+                user.save(update_fields=["is_active"])
+        return Response(_token_payload(user), status=status.HTTP_200_OK)
+
+
+class LoginChallengeView(APIView):
+    """Public: verify the password, then email a one-time login code (no JWT yet)."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginChallengeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        User = get_user_model()
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None or not user.check_password(serializer.validated_data["password"]):
+            return Response(
+                {"detail": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if not user.is_active:
+            return Response(
+                {"detail": "Account not verified. Use the signup code sent to your email."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            with transaction.atomic():
+                code, raw_code = _issue_verification_code(email, "login")
+                _send_verification_email(user.email, raw_code, "login")
+        except VerificationEmailError:
+            return Response(
+                {"detail": "Could not deliver the verification email. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(_challenge_payload(code, email, "login"), status=status.HTTP_202_ACCEPTED)
+
+
+class LoginVerifyView(APIView):
+    """Public: re-check password + consume the emailed code, then issue the JWT."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        User = get_user_model()
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None or not user.check_password(serializer.validated_data["password"]):
+            return Response(
+                {"detail": "Invalid email or password."}, status=status.HTTP_400_BAD_REQUEST
+            )
+        if not user.is_active:
+            return Response(
+                {"detail": "Account not verified. Use the signup code sent to your email."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        _, error = _consume_code(email, "login", serializer.validated_data["code"])
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_token_payload(user), status=status.HTTP_200_OK)
+
+
+class ResendView(APIView):
+    """Public: re-email a pending code, bounded by a cooldown and a resend cap."""
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = ResendSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"]
+        purpose = serializer.validated_data["purpose"]
+        latest = _latest_code(email, purpose)
+        if latest is None or latest.consumed_at is not None:
+            return Response(
+                {"detail": "No pending verification to resend."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        cooldown = settings.VERIFICATION_RESEND_COOLDOWN_SECONDS
+        elapsed = (timezone.now() - latest.created_at).total_seconds()
+        if elapsed < cooldown:
+            wait = int(cooldown - elapsed) + 1
+            return Response(
+                {"detail": f"Please wait {wait} second(s) before requesting another code."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        if latest.resend_count >= settings.VERIFICATION_MAX_RESENDS:
+            return Response(
+                {"detail": "Maximum resend limit reached. Request a new challenge."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        try:
+            with transaction.atomic():
+                code, raw_code = _issue_verification_code(
+                    email, purpose, resend_count=latest.resend_count + 1
+                )
+                _send_verification_email(email, raw_code, purpose)
+        except VerificationEmailError:
+            return Response(
+                {"detail": "Could not deliver the verification email. Please try again."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response(_challenge_payload(code, email, purpose), status=status.HTTP_202_ACCEPTED)
 
 
 class TenantAPIView(APIView):

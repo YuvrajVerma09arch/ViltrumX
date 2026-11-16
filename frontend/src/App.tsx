@@ -3,6 +3,7 @@ import AppLayout from './components/AppLayout'
 import { auth } from './lib/api'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
+import Verify from './pages/Verify'
 import Onboarding from './pages/Onboarding'
 import CommandDeck from './pages/CommandDeck'
 import OntologyExplorer from './pages/OntologyExplorer'
@@ -27,6 +28,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/verify" element={<Verify />} />
         <Route
           path="/app"
           element={

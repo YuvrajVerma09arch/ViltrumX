@@ -5,8 +5,12 @@ Every tenant-owned row carries a `tenant` FK; views must always filter
 through it (docs/ARCHITECTURE.md §11 — row-scoped tenancy, not schemas).
 """
 
+import uuid
+
 from django.conf import settings
+from django.contrib.auth.hashers import check_password
 from django.db import models
+from django.utils import timezone
 
 CRITICALITY_CHOICES = [
     ("low", "Low"),
@@ -171,3 +175,46 @@ class FeedLine(models.Model):
 
     def __str__(self):
         return f"{self.time_label} {self.agent}: {self.line[:40]}"
+
+
+class VerificationCode(models.Model):
+    """A short-lived, hashed, single-use email code for signup / owner login.
+
+    Only ``code_hash`` is ever persisted — the plaintext 6-digit code exists just
+    long enough to be emailed. Issuing a new code supersedes any still-pending
+    one for the same email + purpose, so an older code can never be replayed.
+    """
+
+    PURPOSE_CHOICES = [
+        ("signup", "Signup"),
+        ("login", "Login"),
+    ]
+
+    challenge_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    email = models.EmailField(db_index=True)
+    code_hash = models.CharField(max_length=255)
+    purpose = models.CharField(max_length=10, choices=PURPOSE_CHOICES)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    resend_count = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["email", "purpose", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.purpose} code for {self.email}"
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at <= timezone.now()
+
+    @property
+    def is_locked(self) -> bool:
+        return self.attempts >= settings.VERIFICATION_MAX_ATTEMPTS
+
+    def check_code(self, raw_code: str) -> bool:
+        """Constant-time-ish verify against the stored hash (never store plaintext)."""
+        return check_password(str(raw_code), self.code_hash)

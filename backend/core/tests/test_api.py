@@ -8,7 +8,10 @@ these same tests keep asserting the response shapes the frontend depends on.
 import pytest
 from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.test import override_settings
 from rest_framework.test import APIClient
+
+from core.tests.test_verification import LOCMEM, clear_outbox, last_email_code
 
 
 @pytest.fixture
@@ -31,12 +34,30 @@ def test_endpoints_require_auth(db):
         assert anonymous.get(url).status_code == 401
 
 
+@override_settings(EMAIL_BACKEND=LOCMEM)
 def test_jwt_login_flow(seeded):
+    """Password + emailed one-time code; the old password-only token route is gone."""
     api = APIClient()
-    token = api.post(
-        "/api/v1/auth/token",
-        {"username": "arjun.mehta@paykraft.in", "password": "viltrumx-demo"},
-    ).json()["access"]
+    clear_outbox()
+    email, password = "arjun.mehta@paykraft.in", "viltrumx-demo"
+
+    assert api.post(
+        "/api/v1/auth/token", {"username": email, "password": password}
+    ).status_code == 404
+
+    challenge = api.post(
+        "/api/v1/auth/login-challenge", {"email": email, "password": password}
+    )
+    assert challenge.status_code == 202
+    assert "access" not in challenge.json()
+
+    verified = api.post(
+        "/api/v1/auth/login-verify",
+        {"email": email, "password": password, "code": last_email_code()},
+        format="json",
+    )
+    assert verified.status_code == 200
+    token = verified.json()["access"]
     api.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     assert api.get("/api/v1/incidents").status_code == 200
 
