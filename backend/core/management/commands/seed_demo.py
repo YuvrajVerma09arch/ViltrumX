@@ -13,6 +13,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from actions.models import Action, AutonomyPolicy, PolicyRule, ProvenanceStep
+from connectors.models import Connector
 from core import demo_data
 from core.models import (
     AgentState,
@@ -26,6 +27,7 @@ from core.models import (
 from ontology import graph as og
 from ontology import neo
 from ontology.models import OntologyEdge, OntologyNode
+from reports.models import PurpleScenario, ReadinessScore
 
 DEMO_EMAIL = "arjun.mehta@paykraft.in"
 DEMO_PASSWORD = "viltrumx-demo"  # noqa: S105 — demo tenant only, never prod
@@ -59,9 +61,11 @@ class Command(BaseCommand):
             FeedLine.objects.filter(tenant=tenant).delete()
             OntologyEdge.objects.filter(tenant=tenant).delete()
             OntologyNode.objects.filter(tenant=tenant).delete()
+            PurpleScenario.objects.filter(tenant=tenant).delete()
+            ReadinessScore.objects.filter(tenant=tenant).delete()
             neo.wipe_tenant(tenant.id)
             self.stdout.write(
-                "Reset: cleared incidents, actions, policies, agents, feed, ontology."
+                "Reset: cleared incidents, actions, policies, agents, feed, ontology, purple."
             )
 
         self._seed_users(tenant)
@@ -70,6 +74,8 @@ class Command(BaseCommand):
         self._seed_policy(tenant)
         self._seed_actions(tenant)
         self._seed_agents_and_feed(tenant)
+        self._seed_connectors(tenant)
+        self._seed_purple(tenant)
 
         self.stdout.write(self.style.SUCCESS("PayKraft demo tenant ready."))
         self.stdout.write(f"Login: {DEMO_EMAIL} / {DEMO_PASSWORD}")
@@ -236,3 +242,46 @@ class Command(BaseCommand):
                     tenant=tenant, time_label=row["t"], agent=row["agent"],
                     line=row["line"], tone=row["tone"],
                 )
+
+    # ── purple team rotation + readiness baseline ────────────────────────────
+    def _seed_purple(self, tenant):
+        """The 4-scenario rotation + last night's readiness baseline, so the
+        Purple Team Console shows the full rotation from the first login (not
+        just whatever's been manually run). The fixtures define the rotation;
+        get_or_create means re-running the nightly sweep or a manual run can
+        still update an individual scenario's result without losing the others.
+
+        Readiness is a nightly aggregate, so we seed last night's sweep as the
+        6-week trend ending at 94%. It recomputes only on the next nightly
+        run_all_scenarios, not on every manual click — see reports/purple.py.
+        """
+        for fixture in demo_data.PT_SCENARIOS:
+            PurpleScenario.objects.get_or_create(
+                tenant=tenant, external_id=fixture["id"],
+                defaults={
+                    "name": fixture["name"], "desc": fixture["desc"],
+                    "last_run_label": fixture["lastRun"], "result": fixture["result"],
+                    "detection_label": fixture["detection"],
+                    "containment_label": fixture["containment"],
+                },
+            )
+        for row in demo_data.READINESS_HISTORY:
+            ReadinessScore.objects.update_or_create(
+                tenant=tenant, week_label=row["week"], defaults={"score": row["score"]},
+            )
+        self.stdout.write(
+            f"Purple team: {len(demo_data.PT_SCENARIOS)} scenarios in rotation, "
+            f"readiness {demo_data.READINESS_HISTORY[-1]['score']}% (last night's sweep)"
+        )
+
+    # ── connectors (demo state: gw, gh, aws connected) ─────────────────────────
+    def _seed_connectors(self, tenant):
+        """Pre-connect the 3 demo connectors so the onboarding page matches
+        the INC-042 scenario (GitHub PAT, AWS key, Workspace login events)."""
+        status_map = {c["id"]: c["status"] for c in demo_data.CONNECTORS}
+        for fixture in demo_data.CONNECTORS:
+            Connector.objects.update_or_create(
+                tenant=tenant,
+                connector_id=fixture["id"],
+                defaults={"name": fixture["name"], "status": status_map[fixture["id"]]},
+            )

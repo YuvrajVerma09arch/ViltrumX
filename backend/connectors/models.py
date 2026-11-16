@@ -3,6 +3,22 @@ from django.db import models
 from core.models import Tenant
 
 
+class OAuthState(models.Model):
+    """Short-lived OAuth state tokens (used instead of session to survive
+    cross-site GitHub redirects). Created during OAuth start, consumed
+    during callback, expired via `expires_at`."""
+    state = models.CharField(max_length=128, unique=True)
+    tenant_id = models.IntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["expires_at"])]
+
+    def __str__(self):
+        return f"OAuthState({self.state[:12]}… → tenant {self.tenant_id})"
+
+
 class Connector(models.Model):
     STATUS_CHOICES = [
         ("available", "Available"),
@@ -15,6 +31,11 @@ class Connector(models.Model):
     name = models.CharField(max_length=60)
     status = models.CharField(max_length=12, choices=STATUS_CHOICES, default="available")
     connected_at = models.DateTimeField(auto_now=True)
+    # GitHub OAuth fields
+    github_installation_id = models.BigIntegerField(null=True, blank=True)
+    github_access_token = models.TextField(blank=True, default="")  # encrypted in production
+    github_app_id = models.CharField(max_length=60, blank=True, default="")
+    github_org_login = models.CharField(max_length=120, blank=True, default="")
 
     class Meta:
         unique_together = [("tenant", "connector_id")]

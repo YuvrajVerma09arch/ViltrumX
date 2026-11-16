@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Check, Crown, Plug } from 'lucide-react'
 import { PageHeader, Card, Button, StatusPill, CriticalityBadge, Segmented, DataSource } from '../components/ui'
 import { CONNECTORS } from '../data/mock'
-import { endpoints } from '../lib/api'
+import { endpoints, auth as authStore } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import { cn, type Criticality } from '../lib/utils'
 
@@ -21,6 +21,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(1)
   const connectors = useApi<typeof CONNECTORS>(() => endpoints.connectors(), CONNECTORS)
   const [connected, setConnected] = useState<Record<string, boolean>>({})
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Seed local toggle state from whatever the server already has connected.
   useEffect(() => {
@@ -29,9 +30,34 @@ export default function Onboarding() {
     )
   }, [connectors.data])
 
+  // Handle GitHub OAuth callback: if URL has ?connected=github, refresh connectors
+  useEffect(() => {
+    if (searchParams.get('connected') === 'github') {
+      // Clear the param and re-fetch
+      setSearchParams({})
+      // Trigger a refetch to show the newly connected GitHub
+      connectors.reload()
+    }
+  }, [searchParams, setSearchParams, connectors])
+
   // Persist the connection so it survives a reload — the wizard is a real
   // setup flow, not a slideshow.
   async function connect(id: string) {
+    if (id === 'gh') {
+      // GitHub uses OAuth flow — redirect to GitHub
+      try {
+        const res = await endpoints.githubOAuthStart()
+        if (res.auth_url) {
+          window.location.href = res.auth_url
+          return
+        }
+      } catch (err) {
+        console.error('GitHub OAuth start failed:', err)
+        alert('Failed to start GitHub connection. Is the API running?')
+      }
+      return
+    }
+    
     setConnected((prev) => ({ ...prev, [id]: true }))
     try {
       await endpoints.connect(id)
@@ -82,7 +108,7 @@ export default function Onboarding() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="ob-org" className="mb-1.5 block text-sm font-medium">Organisation</label>
-              <input id="ob-org" defaultValue="PayKraft Technologies" className="w-full rounded-md border border-border bg-bg px-3 py-2.5 text-sm focus:border-accent focus:outline-none" />
+              <input id="ob-org" defaultValue={authStore.tenant?.name ?? ''} className="w-full rounded-md border border-border bg-bg px-3 py-2.5 text-sm focus:border-accent focus:outline-none" />
             </div>
             <div>
               <label htmlFor="ob-industry" className="mb-1.5 block text-sm font-medium">Industry</label>
