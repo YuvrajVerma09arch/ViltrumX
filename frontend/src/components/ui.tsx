@@ -112,12 +112,12 @@ export function Badge({ tone = 'neutral', children, className }: {
 }
 
 /**
- * Live vs offline indicator.
+ * Live vs no-data indicator.
  *
- * Shown wherever a screen may be rendering `mock.ts` fixtures because the API
- * was unreachable. Being explicit about this matters: a demo that silently
- * shows fake data as if it were real is the thing an examiner is entitled to
- * be annoyed about.
+ * Shown wherever a screen's API request did not return data. Being explicit
+ * about this matters: a page that silently presents a failed/empty state as
+ * if it were live data is misleading. When `live` is false the page renders
+ * its honest empty state, so there are no fixtures to warn about.
  */
 export function DataSource({ live, loading }: { live: boolean; loading?: boolean }) {
   if (loading) return <Badge tone="neutral">connecting…</Badge>
@@ -129,7 +129,7 @@ export function DataSource({ live, loading }: { live: boolean; loading?: boolean
   ) : (
     <Badge tone="amber">
       <WifiOff size={11} aria-hidden />
-      OFFLINE FIXTURES
+      NO LIVE DATA
     </Badge>
   )
 }

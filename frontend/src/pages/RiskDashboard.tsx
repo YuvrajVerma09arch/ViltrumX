@@ -2,10 +2,14 @@ import { useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { TrendingUp, TrendingDown } from 'lucide-react'
 import { PageHeader, Card, StatTile, Toggle, ProgressBar, Badge, DataSource } from '../components/ui'
-import { RISK_TREND, ENTITY_RISK, READINESS_HISTORY } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
-import { formatINR } from '../lib/utils'
+
+// Shapes served by the risk endpoints. Declared locally so this page has no
+// dependency on the demo fixtures in `data/mock.ts`.
+type RiskPoint = { day: string; org: number | null; forecast: number | null }
+type EntityRisk = { entity: string; type: string; score: number; trend: string; reason: string }
+type ReadinessPoint = { week: string; score: number }
 
 const AXIS_TICK = { fill: '#6e7b8a', fontSize: 11, fontFamily: 'JetBrains Mono' }
 const TOOLTIP_STYLE = {
@@ -32,9 +36,18 @@ function ReadinessGauge({ value }: { value: number }) {
 export default function RiskDashboard() {
   const [founderMode, setFounderMode] = useState(false)
 
-  const trend = useApi<typeof RISK_TREND>(() => endpoints.riskTrend(), RISK_TREND)
-  const entities = useApi<typeof ENTITY_RISK>(() => endpoints.riskEntities(), ENTITY_RISK)
-  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+  // Empty defaults: a failed request or an empty tenant must render honest
+  // empty states, never the PayKraft demo fixtures.
+  const trend = useApi<RiskPoint[]>(() => endpoints.riskTrend(), [])
+  const entities = useApi<EntityRisk[]>(() => endpoints.riskEntities(), [])
+  const readiness = useApi<ReadinessPoint[]>(() => endpoints.readiness(), [])
+
+  // Stat tiles derive from the same data the charts show, so they can never
+  // drift from it the way hardcoded demo numbers did.
+  const lastObserved = [...trend.data].reverse().find((p) => p.org !== null)?.org
+  const lastForecast = [...trend.data].reverse().find((p) => p.forecast !== null)?.forecast
+  const lastReadiness = readiness.data[readiness.data.length - 1]
+  const aboveThreshold = entities.data.filter((e) => e.score > 70).length
 
   return (
     <div>
@@ -55,17 +68,17 @@ export default function RiskDashboard() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {founderMode ? (
           <>
-            <StatTile label="Value protected today" value={formatINR(3_20_00_000)} hint="customer data targeted by INC-042 — nothing left" tone="good" />
-            <StatTile label="Max DPDP penalty exposure" value={formatINR(250_00_00_000)} hint="statutory ceiling — evidence pack keeps you defensible" tone="warning" />
-            <StatTile label="Your security spend" value={`${formatINR(29_499)}/mo`} hint="vs ₹3.2 Cr median breach cost for Indian SMBs" tone="accent" />
-            <StatTile label="Decisions waiting on you" value="1" hint="freeze Priya's account — 2-minute read in Hindi or English" tone="critical" />
+            <StatTile label="Value protected today" value="—" hint="no exposure data yet" tone="good" />
+            <StatTile label="Max DPDP penalty exposure" value="—" hint="no statutory exposure figure available" tone="warning" />
+            <StatTile label="Your security spend" value="—" hint="no billing data in this view" tone="accent" />
+            <StatTile label="Decisions waiting on you" value="—" hint="open Provenance to review decisions" tone="critical" />
           </>
         ) : (
           <>
-            <StatTile label="Org risk score" value="58 / 100" hint="↑ 24 today — driven by INC-042" tone="critical" icon={TrendingUp} />
-            <StatTile label="5-day forecast" value="33" hint="↓ falling as containment holds" tone="good" icon={TrendingDown} />
-            <StatTile label="Entities above threshold" value="3" hint="of 214 tracked objects" tone="warning" />
-            <StatTile label="Defense readiness" value="94%" hint="nightly purple-team validated" tone="good" />
+            <StatTile label="Org risk score" value={lastObserved != null ? `${lastObserved} / 100` : '—'} hint={lastObserved != null ? 'latest observed score' : 'no risk data yet'} tone="critical" icon={TrendingUp} />
+            <StatTile label="5-day forecast" value={lastForecast ?? '—'} hint={lastForecast != null ? 'ML forecast from behavioral features' : 'no forecast data yet'} tone="good" icon={TrendingDown} />
+            <StatTile label="Entities above threshold" value={String(aboveThreshold)} hint={entities.data.length ? `of ${entities.data.length} tracked entities` : 'no entities tracked yet'} tone="warning" />
+            <StatTile label="Defense readiness" value={lastReadiness ? `${lastReadiness.score}%` : '—'} hint={lastReadiness ? 'nightly purple-team validated' : 'no readiness data yet'} tone="good" />
           </>
         )}
       </div>
@@ -73,42 +86,61 @@ export default function RiskDashboard() {
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         {/* Risk trend + forecast */}
         <Card title={founderMode ? 'How exposed were we? (last 14 days)' : 'Org risk — observed & forecast'} className="xl:col-span-2">
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={trend.data} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
-              <CartesianGrid stroke="#21262d" vertical={false} />
-              <XAxis dataKey="day" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
-              <YAxis domain={[0, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
-              <Legend wrapperStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, color: '#9ba7b4' }} />
-              <Line name="observed risk" type="monotone" dataKey="org" stroke="#3987e5" strokeWidth={2} dot={{ r: 3, fill: '#3987e5', stroke: '#161b22', strokeWidth: 2 }} connectNulls={false} />
-              <Line name="ML forecast" type="monotone" dataKey="forecast" stroke="#3987e5" strokeWidth={2} strokeDasharray="6 5" dot={false} connectNulls={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          {trend.data.length === 0 ? (
+            <div className="flex h-[260px] items-center justify-center font-mono text-xs text-ink-3">
+              No risk data yet.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={trend.data} margin={{ top: 8, right: 12, bottom: 0, left: -18 }}>
+                <CartesianGrid stroke="#21262d" vertical={false} />
+                <XAxis dataKey="day" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
+                <YAxis domain={[0, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
+                <Legend wrapperStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, color: '#9ba7b4' }} />
+                <Line name="observed risk" type="monotone" dataKey="org" stroke="#3987e5" strokeWidth={2} dot={{ r: 3, fill: '#3987e5', stroke: '#161b22', strokeWidth: 2 }} connectNulls={false} />
+                <Line name="ML forecast" type="monotone" dataKey="forecast" stroke="#3987e5" strokeWidth={2} strokeDasharray="6 5" dot={false} connectNulls={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
           <p className="mt-2 text-xs text-ink-3">
-            {founderMode
-              ? 'The spike is last night\'s attack. The dotted line is the system\'s prediction: back to normal within 4 days as containment holds.'
-              : 'Forecast: gradient-boosted model over behavioral features + graph centrality. Spike attributed to INC-042 (weight 0.81).'}
+            {trend.data.length === 0
+              ? 'No forecast available yet.'
+              : founderMode
+                ? 'The dotted line is the system\'s prediction — how exposure is expected to trend as containment holds.'
+                : 'Forecast: gradient-boosted model over behavioral features + graph centrality.'}
           </p>
         </Card>
 
         {/* Readiness */}
         <Card title="Defense Readiness Score">
-          <ReadinessGauge value={94} />
-          <p className="mt-1 text-center text-xs text-ink-3">validated 03:24 IST by the nightly purple-team sweep</p>
-          <ResponsiveContainer width="100%" height={110}>
-            <LineChart data={readiness.data} margin={{ top: 16, right: 8, bottom: 0, left: -22 }}>
-              <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
-              <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
-              <Line name="readiness" type="monotone" dataKey="score" stroke="#199e70" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          {readiness.data.length === 0 ? (
+            <div className="flex h-[180px] items-center justify-center font-mono text-xs text-ink-3">
+              No readiness data yet.
+            </div>
+          ) : (
+            <>
+              <ReadinessGauge value={lastReadiness?.score ?? 0} />
+              <p className="mt-1 text-center text-xs text-ink-3">computed live from the nightly purple-team sweep</p>
+              <ResponsiveContainer width="100%" height={110}>
+                <LineChart data={readiness.data} margin={{ top: 16, right: 8, bottom: 0, left: -22 }}>
+                  <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
+                  <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
+                  <Line name="readiness" type="monotone" dataKey="score" stroke="#199e70" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </>
+          )}
         </Card>
       </div>
 
       {/* Entity risk table */}
       <Card title={founderMode ? 'What should worry you, in plain words' : 'Highest-risk entities'} className="mt-4" padded={false}>
         <ul className="divide-y divide-border-subtle">
+          {entities.data.length === 0 && (
+            <li className="px-4 py-10 text-center font-mono text-xs text-ink-3">No entities tracked yet.</li>
+          )}
           {entities.data.map((e) => (
             <li key={e.entity} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
               <div className="w-56 min-w-0">

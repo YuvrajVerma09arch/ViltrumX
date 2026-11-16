@@ -2,14 +2,33 @@ import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Briefcase, FileSearch, ArrowRight, Loader2 } from 'lucide-react'
 import { PageHeader, Card, Badge, SeverityBadge, StatusPill, Button, Segmented, Toggle, StatTile, DataSource } from '../components/ui'
-import { ATTACK_CHAIN, EVIDENCE, INCIDENTS, type Action, type ChainStep, type Incident } from '../data/mock'
 import { NARRATIVE, LANG_OPTIONS, type Lang } from '../data/i18n'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
-import { cn } from '../lib/utils'
+import { cn, type Severity, type AutonomyLevel } from '../lib/utils'
 
+// Shapes served by the incident/action endpoints. Declared locally so this
+// page has no dependency on the demo fixtures in `data/mock.ts`.
+type Incident = {
+  id: string
+  title: string
+  severity: Severity
+  status: string
+  entity: string
+  time: string
+  mitre: string[]
+}
+type ChainStep = {
+  time: string
+  title: string
+  detail: string
+  mitre: string
+  mitreName: string
+  severity: Severity
+}
 type Evidence = { id: string; kind: string; source: string; excerpt: string }
 type IncidentDetail = Incident & { attackChain?: ChainStep[]; evidence?: Evidence[] }
+type Action = { id: string; type: string; level: AutonomyLevel; status: string }
 
 export default function Investigation() {
   const [lang, setLang] = useState<Lang>('en')
@@ -19,7 +38,7 @@ export default function Investigation() {
 
   const detail = useApi<IncidentDetail>(
     () => endpoints.incident(incidentId),
-    { ...INCIDENTS[0], attackChain: ATTACK_CHAIN, evidence: EVIDENCE as Evidence[] },
+    { id: '', title: '', severity: 'low', status: '', entity: '', time: '', mitre: [] },
     [incidentId],
   )
 
@@ -33,8 +52,8 @@ export default function Investigation() {
 
   const inc = detail.data
   const n = narrative.data
-  const chain = inc.attackChain ?? ATTACK_CHAIN
-  const evidence = inc.evidence ?? (EVIDENCE as Evidence[])
+  const chain = inc.attackChain ?? []
+  const evidence = inc.evidence ?? []
 
   // Founder Mode's "approve" button acts on the real pending L4 action, so the
   // founder-facing view and the analyst-facing Provenance view drive the same
@@ -62,17 +81,20 @@ export default function Investigation() {
     <div>
       <PageHeader
         title="Investigation Workspace"
-        subtitle={<span className="font-mono">{inc.id} · {inc.title}</span>}
+        subtitle={<span className="font-mono">{inc.id ? `${inc.id} · ${inc.title}` : 'Select an incident to begin.'}</span>}
       >
         <DataSource live={detail.live} loading={detail.loading} />
-        <SeverityBadge severity={inc.severity} />
-        <StatusPill status={inc.status} />
+        {inc.id && <SeverityBadge severity={inc.severity} />}
+        {inc.status && <StatusPill status={inc.status} />}
       </PageHeader>
 
       <div className="grid gap-4 xl:grid-cols-5">
         {/* Attack chain timeline */}
         <Card title="Attack chain — forensic timeline" className="xl:col-span-3" padded={false}>
           <ol className="relative p-5">
+            {chain.length === 0 && (
+              <li className="py-10 text-center font-mono text-xs text-ink-3">No attack chain recorded for this incident.</li>
+            )}
             {chain.map((step, i) => (
               <li key={`${step.time}-${i}`} className="relative pb-6 pl-8 last:pb-0">
                 {i < chain.length - 1 && (
@@ -153,6 +175,9 @@ export default function Investigation() {
           {/* Evidence locker */}
           <Card title="Evidence locker" padded={false}>
             <ul className="divide-y divide-border-subtle">
+              {evidence.length === 0 && (
+                <li className="px-4 py-10 text-center font-mono text-xs text-ink-3">No evidence collected yet.</li>
+              )}
               {evidence.map((ev) => (
                 <li key={ev.id} className="px-4 py-3">
                   <div className="flex items-center gap-2 text-xs">
@@ -170,9 +195,9 @@ export default function Investigation() {
 
           <Card title="Case detail">
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm">
-              <dt className="text-ink-3">Primary entity</dt><dd className="font-mono text-xs">{inc.entity}</dd>
+              <dt className="text-ink-3">Primary entity</dt><dd className="font-mono text-xs">{inc.entity || '—'}</dd>
               <dt className="text-ink-3">MITRE techniques</dt>
-              <dd className="flex flex-wrap gap-1">{inc.mitre.map((m) => <Badge key={m} tone="purple">{m}</Badge>)}</dd>
+              <dd className="flex flex-wrap gap-1">{inc.mitre.length ? inc.mitre.map((m) => <Badge key={m} tone="purple">{m}</Badge>) : <span className="text-ink-3">—</span>}</dd>
               <dt className="text-ink-3">Similar precedent</dt>
               <dd className="text-xs text-ink-2">INC-041 (Qdrant recall, 0.83 sim)</dd>
               <dt className="text-ink-3">Assigned</dt>

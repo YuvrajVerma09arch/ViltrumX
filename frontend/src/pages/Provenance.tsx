@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react'
 import { Check, X, Undo2, PlayCircle, Loader2 } from 'lucide-react'
 import { PageHeader, Card, AutonomyBadge, StatusPill, Button, Table, Td, DataSource } from '../components/ui'
-import { ACTIONS, PROVENANCE_TRACE, type Action } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
-import { cn } from '../lib/utils'
+import { cn, type AutonomyLevel } from '../lib/utils'
 
+// Shapes served by /actions and /actions/:id/trace. Declared locally so this
+// page has no dependency on the demo fixtures in `data/mock.ts`.
+type Action = {
+  id: string
+  type: string
+  target: string
+  level: AutonomyLevel
+  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled'
+  blastRadius: number
+  time: string
+  rollback: string
+}
 type TraceStep = { step: string; detail: string; ok: boolean }
 
 export default function Provenance() {
-  const actions = useApi<Action[]>(() => endpoints.actions(), ACTIONS)
+  const actions = useApi<Action[]>(() => endpoints.actions(), [])
   const [selectedId, setSelectedId] = useState('')
   const [rollbackAsk, setRollbackAsk] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -25,7 +36,7 @@ export default function Provenance() {
 
   const trace = useApi<TraceStep[]>(
     () => (selectedId ? endpoints.actionTrace(selectedId) : Promise.reject(new Error('no selection'))),
-    PROVENANCE_TRACE as TraceStep[],
+    [],
     [selectedId],
   )
 
@@ -110,6 +121,9 @@ export default function Provenance() {
           </div>
 
           <ol className="space-y-0">
+            {trace.data.length === 0 && (
+              <li className="py-6 text-center font-mono text-xs text-ink-3">No decision trace recorded.</li>
+            )}
             {trace.data.map((t, i) => (
               <li key={`${t.step}-${i}`} className="relative pb-4 pl-7 last:pb-0">
                 {i < trace.data.length - 1 && <span className="absolute top-4 left-[7px] h-full w-px bg-border" aria-hidden />}

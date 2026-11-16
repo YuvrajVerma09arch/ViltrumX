@@ -2,18 +2,52 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ShieldAlert, BellOff, Zap, Target, ArrowRight } from 'lucide-react'
 import { PageHeader, Card, StatTile, SeverityBadge, StatusPill, Badge, DataSource } from '../components/ui'
-import { AGENTS, INCIDENTS, ACTIVITY_FEED, READINESS_HISTORY, type Agent, type Incident, type Action } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi, useLiveFeed, type FeedLine } from '../lib/hooks'
-import { cn } from '../lib/utils'
+import { cn, type Severity, type AutonomyLevel } from '../lib/utils'
+
+// Shapes served by the API — declared locally so this page has no dependency
+// on the demo fixtures in `data/mock.ts`.
+type Agent = {
+  id: string
+  name: string
+  role: string
+  status: 'active' | 'idle' | 'awaiting approval'
+  currentTask: string
+  stat: string
+}
+type Incident = {
+  id: string
+  title: string
+  severity: Severity
+  status: 'active' | 'contained' | 'resolved'
+  entity: string
+  time: string
+  mitre: string[]
+}
+type Action = {
+  id: string
+  type: string
+  target: string
+  level: AutonomyLevel
+  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled'
+  blastRadius: number
+  time: string
+  rollback: string
+}
+type ReadinessPoint = { week: string; score: number }
 
 export default function CommandDeck() {
-  const agents = useApi<Agent[]>(() => endpoints.agents(), AGENTS)
-  const incidents = useApi<Incident[]>(() => endpoints.incidents(), INCIDENTS)
+  // Honest empty defaults: a failed request or an empty tenant must never fall
+  // back to the PayKraft demo fixtures.
+  const agents = useApi<Agent[]>(() => endpoints.agents(), [])
+  const incidents = useApi<Incident[]>(() => endpoints.incidents(), [])
   const actions = useApi<Action[]>(() => endpoints.actions(), [])
-  const seed = useApi<FeedLine[]>(() => endpoints.feed(), ACTIVITY_FEED as FeedLine[])
-  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+  const seed = useApi<FeedLine[]>(() => endpoints.feed(), [])
+  const readiness = useApi<ReadinessPoint[]>(() => endpoints.readiness(), [])
   const { lines, connected } = useLiveFeed(seed.data)
+
+  const lastReadiness = readiness.data[readiness.data.length - 1]
 
   // Stat tiles are derived from the same data the tables show, so they can
   // never drift from it the way hardcoded numbers did.
@@ -35,7 +69,7 @@ export default function CommandDeck() {
     <div>
       <PageHeader
         title="Command Deck"
-        subtitle="Live view of every agent, incident, and governed action across PayKraft's world."
+        subtitle="Live view of every agent, incident, and governed action across your organization."
       >
         <div className="flex items-center gap-2">
           <DataSource live={incidents.live} loading={incidents.loading} />
@@ -52,15 +86,24 @@ export default function CommandDeck() {
       {/* Stat row */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatTile label="Open incidents" value={String(stats.open)} hint={stats.openHint} tone="critical" icon={ShieldAlert} />
-        <StatTile label="Alerts suppressed (24h)" value="303 / 312" hint="97.1% noise-gated before human eyes" tone="good" icon={BellOff} />
+        <StatTile label="Alerts suppressed (24h)" value="—" hint="no suppression telemetry yet" tone="good" icon={BellOff} />
         <StatTile label="Actions fired (24h)" value={String(stats.fired)} hint={stats.firedHint} tone="accent" icon={Zap} />
-        <StatTile label="Defense readiness" value={`${readiness.data.length ? readiness.data[readiness.data.length - 1].score : 94}%`} hint="computed live from the purple-team pass rate" tone="good" icon={Target} />
+        <StatTile
+          label="Defense readiness"
+          value={lastReadiness ? `${lastReadiness.score}%` : '—'}
+          hint={lastReadiness ? 'computed live from the purple-team pass rate' : 'no readiness data yet'}
+          tone="good"
+          icon={Target}
+        />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-5">
         {/* Agent pipeline */}
         <Card title="Agent pipeline" className="xl:col-span-3" padded={false}>
           <ul className="grid gap-px bg-border-subtle sm:grid-cols-2">
+            {agents.data.length === 0 && (
+              <li className="bg-surface px-4 py-10 text-center font-mono text-xs text-ink-3">No agents reported yet.</li>
+            )}
             {agents.data.map((a) => (
               <li key={a.id} className="bg-surface p-4">
                 <div className="flex items-center justify-between">
@@ -96,6 +139,9 @@ export default function CommandDeck() {
           action={<Link to="/app/investigation" className="inline-flex items-center gap-1 text-xs text-accent hover:text-accent-bright">open workspace <ArrowRight size={12} aria-hidden /></Link>}
         >
           <ul className="divide-y divide-border-subtle">
+            {incidents.data.length === 0 && (
+              <li className="px-4 py-10 text-center font-mono text-xs text-ink-3">No incidents recorded yet.</li>
+            )}
             {incidents.data.map((inc) => (
               <li key={inc.id}>
                 <Link to={`/app/investigation?incident=${inc.id}`} className="block px-4 py-3 transition-colors hover:bg-surface-2">
@@ -125,6 +171,9 @@ export default function CommandDeck() {
         action={<DataSource live={seed.live} loading={seed.loading} />}
       >
         <div className="max-h-72 space-y-1 overflow-y-auto p-4 font-mono text-xs md:text-[13px]">
+          {lines.length === 0 && (
+            <p className="py-6 text-center font-mono text-xs text-ink-3">No activity yet.</p>
+          )}
           {lines.map((l, i) => (
             <div key={`${l.t}-${i}`} className="feed-in flex gap-3" style={{ animationDelay: `${Math.min(i, 12) * 60}ms` }}>
               <span className="shrink-0 text-ink-3">{l.t}</span>

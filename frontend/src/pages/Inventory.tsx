@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { PageHeader, Card, Table, Td, CriticalityBadge, ProgressBar, Badge, Segmented, DataSource } from '../components/ui'
-import { INV_IDENTITIES, INV_CLOUD, INV_REPOS, INV_SAAS } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import type { Criticality } from '../lib/utils'
@@ -16,18 +15,13 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'saas', label: 'SaaS' },
 ]
 
-const FIXTURES: Record<Tab, Row[]> = {
-  identities: INV_IDENTITIES,
-  cloud: INV_CLOUD,
-  repos: INV_REPOS,
-  saas: INV_SAAS,
-}
-
 export default function Inventory() {
   const [tab, setTab] = useState<Tab>('identities')
 
   // Refetches on tab change — the category is a server-side query param.
-  const inventory = useApi<Row[]>(() => endpoints.inventory(tab), FIXTURES[tab], [tab])
+  // Empty default: an empty tenant or failed request shows an honest empty
+  // state, never the PayKraft demo inventory.
+  const inventory = useApi<Row[]>(() => endpoints.inventory(tab), [], [tab])
   const rows = inventory.data
 
   return (
@@ -44,6 +38,11 @@ export default function Inventory() {
         <Table head={[
           'Object', tab === 'identities' ? 'MFA' : 'Posture', 'Risk', 'Criticality',
         ]}>
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={4} className="px-3 py-10 text-center font-mono text-xs text-ink-3">No objects in this category yet.</td>
+            </tr>
+          )}
           {rows.map((r) => (
             <tr key={r.name} className="hover:bg-surface-2/50">
               <Td>

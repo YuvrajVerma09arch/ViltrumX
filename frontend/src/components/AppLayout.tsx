@@ -5,8 +5,11 @@ import {
   History, Swords, FileCheck2, Settings, Bell, Plug, LogOut } from 'lucide-react'
 import { auth as authStore, endpoints, logout } from '../lib/api'
 import { useApi } from '../lib/hooks'
-import type { Action } from '../data/mock'
 import { cn } from '../lib/utils'
+
+// Shape of a governed action from /actions. Declared locally so the layout
+// has no dependency on the demo fixtures in `data/mock.ts`.
+type Action = { id: string; type: string; target: string; level: string; status: string }
 
 const NAV = [
   {
@@ -143,7 +146,7 @@ export default function AppLayout() {
         {sessionExpired && (
           <div className="flex items-center justify-between gap-3 border-b border-status-critical/40 bg-status-critical/10 px-5 py-2.5 text-sm">
             <span className="text-danger">
-              Your session expired — some screens may be showing saved demo data. Log in again to see live data.
+              Your session expired — some screens may be empty. Log in again to see live data.
             </span>
             <div className="flex items-center gap-2">
               <button

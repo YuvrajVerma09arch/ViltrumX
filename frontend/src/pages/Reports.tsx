@@ -2,17 +2,28 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { FileDown, FileCheck2, Timer, Loader2 } from 'lucide-react'
 import { PageHeader, Card, Badge, Button, Table, Td, DataSource } from '../components/ui'
-import { FRAMEWORKS, RECENT_EXPORTS } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
+
+// Shapes served by the compliance endpoints. Declared locally rather than
+// derived from the demo fixture, so an empty tenant sees no demo data.
+type Framework = {
+  id: string
+  name: string
+  region: string
+  status: string
+  controls: string
+  note: string
+}
+type RecentExport = { name: string; kind: string; when: string }
 
 export default function Reports() {
   const [exporting, setExporting] = useState<string | null>(null)
   const [exported, setExported] = useState<string[]>([])
   const [exportNames, setExportNames] = useState<Record<string, string>>({})
 
-  const frameworks = useApi<typeof FRAMEWORKS>(() => endpoints.frameworks(), FRAMEWORKS)
-  const recent = useApi<typeof RECENT_EXPORTS>(() => endpoints.exports(), RECENT_EXPORTS)
+  const frameworks = useApi<Framework[]>(() => endpoints.frameworks(), [])
+  const recent = useApi<RecentExport[]>(() => endpoints.exports(), [])
 
   // Generates the evidence pack server-side from the provenance trace, then
   // refreshes the recent-exports list so the new pack appears. We keep the
@@ -62,11 +73,16 @@ export default function Reports() {
       >
         <div className="flex items-center gap-2">
           <DataSource live={frameworks.live} loading={frameworks.loading} />
-          <Badge tone="amber"><Timer size={11} aria-hidden /> CERT-IN CLOCK: 5H 27M LEFT ON INC-042</Badge>
+          <Badge tone="amber"><Timer size={11} aria-hidden /> CERT-IN · 6-HOUR BREACH REPORTING</Badge>
         </div>
       </PageHeader>
 
       <div className="grid gap-4 md:grid-cols-2">
+        {frameworks.data.length === 0 && (
+          <p className="rounded-lg border border-dashed border-border bg-surface px-4 py-10 text-center font-mono text-xs text-ink-3 md:col-span-2">
+            No frameworks configured yet.
+          </p>
+        )}
         {frameworks.data.map((f) => (
           <Card key={f.id} title={f.name} action={<Badge tone="neutral">{f.region.toUpperCase()}</Badge>}>
             <div className="flex items-center gap-2">
@@ -105,6 +121,11 @@ export default function Reports() {
 
       <Card title="Recent exports" className="mt-4" padded={false}>
         <Table head={['Document', 'Format', 'Generated']}>
+          {recent.data.length === 0 && (
+            <tr>
+              <td colSpan={3} className="px-3 py-8 text-center font-mono text-xs text-ink-3">No exports recorded yet.</td>
+            </tr>
+          )}
           {recent.data.map((r) => (
             <tr key={r.name} className="hover:bg-surface-2/50">
               <Td className="font-medium">{r.name}</Td>

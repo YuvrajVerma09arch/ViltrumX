@@ -1,11 +1,14 @@
 /**
  * Data-fetching hooks.
  *
- * `useApi` is the workhorse: it runs a fetcher, and if the request fails for
- * any reason (backend down, no token, network error) it falls back to the
- * `mock.ts` fixture that screen already used. The returned `live` flag says
- * which one you're looking at, so the UI can be honest about it instead of
- * passing fixtures off as real data.
+ * `useApi` is the workhorse: it runs a fetcher and returns
+ * `{ data, loading, error, live }`. Callers pass an *honest empty default*
+ * (`[]`, `0`, `—`, …) as `fallback`: if the request fails, the screen renders
+ * an empty state rather than another tenant's numbers. Never pass a value
+ * from `data/mock.ts` as a fallback — that would show the PayKraft demo
+ * fixtures to a real customer with no data. The returned `live` flag is true
+ * only when the data actually came from the API, so the UI can label its
+ * source accurately.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -15,7 +18,7 @@ export type ApiState<T> = {
   data: T
   loading: boolean
   error: string | null
-  /** true = served by the API; false = showing the offline fixture */
+  /** true = served by the API; false = showing the caller's empty fallback (request failed) */
   live: boolean
   reload: () => void
 }

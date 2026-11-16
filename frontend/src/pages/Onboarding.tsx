@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Check, Crown, Plug } from 'lucide-react'
 import { PageHeader, Card, Button, StatusPill, CriticalityBadge, Segmented, DataSource } from '../components/ui'
-import { CONNECTORS } from '../data/mock'
 import { endpoints, auth as authStore } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import { cn, type Criticality } from '../lib/utils'
+
+// Shape served by /connectors. Declared locally so this page has no dependency
+// on the demo fixtures in `data/mock.ts`.
+type Connector = { id: string; name: string; desc: string; status: string; time: string }
 
 const STEPS = ['Org profile', 'Connect sources', 'Tag crown jewels', 'Autonomy defaults']
 
@@ -19,7 +22,7 @@ const JEWEL_CANDIDATES: { name: string; kind: string; initial: Criticality }[] =
 
 export default function Onboarding() {
   const [step, setStep] = useState(1)
-  const connectors = useApi<typeof CONNECTORS>(() => endpoints.connectors(), CONNECTORS)
+  const connectors = useApi<Connector[]>(() => endpoints.connectors(), [])
   const [connected, setConnected] = useState<Record<string, boolean>>({})
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -139,6 +142,11 @@ export default function Onboarding() {
       {step === 2 && (
         <Card title="Step 2 · Connect sources">
           <ul className="space-y-2.5">
+            {connectors.data.length === 0 && (
+              <li className="rounded-md border border-dashed border-border px-4 py-8 text-center font-mono text-xs text-ink-3">
+                No connectors available yet.
+              </li>
+            )}
             {connectors.data.map((c) => {
               const isOn = connected[c.id]
               return (

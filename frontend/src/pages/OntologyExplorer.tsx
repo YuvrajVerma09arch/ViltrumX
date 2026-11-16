@@ -3,10 +3,24 @@ import { ReactFlow, Background, Controls, MiniMap, Handle, Position, type Node, 
 import '@xyflow/react/dist/style.css'
 import { User, Bot, KeyRound, Laptop, Cloud, GitBranch, Grid2x2, Database, X } from 'lucide-react'
 import { PageHeader, Card, Badge, CriticalityBadge, DataSource } from '../components/ui'
-import { ONT_NODES, ONT_EDGES, type OntNode, type OntEdge, type OntNodeType } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
-import { cn } from '../lib/utils'
+import { cn, type Criticality } from '../lib/utils'
+
+// Graph shapes served by /ontology/graph. Declared locally so this page has no
+// dependency on the demo fixtures in `data/mock.ts`.
+type OntNodeType = 'user' | 'service' | 'apikey' | 'device' | 'cloud' | 'repo' | 'saas' | 'data'
+type OntNode = {
+  id: string
+  label: string
+  type: OntNodeType
+  criticality: Criticality
+  x: number
+  y: number
+  compromised?: boolean
+  meta: string
+}
+type OntEdge = { id: string; source: string; target: string; label: string; attack?: boolean }
 
 /** Entity-class colors (validated categorical slots — identity also carried by icon + label). */
 const TYPE_META: Record<OntNodeType, { color: string; icon: typeof User; cls: string }> = {
@@ -59,7 +73,7 @@ export default function OntologyExplorer() {
 
   const graph = useApi<Graph>(
     () => endpoints.ontologyGraph(),
-    { nodes: ONT_NODES, edges: ONT_EDGES },
+    { nodes: [], edges: [] },
   )
   const ontNodes = graph.data.nodes
   const ontEdges = graph.data.edges
@@ -91,7 +105,7 @@ export default function OntologyExplorer() {
     <div>
       <PageHeader
         title="Ontology Explorer"
-        subtitle={`PayKraft's world as a typed graph — ${ontNodes.length} objects, ${ontEdges.length} links, synced from Workspace, GitHub, and CloudTrail.`}
+        subtitle={`Your world as a typed graph — ${ontNodes.length} objects, ${ontEdges.length} links, synced from your connected sources.`}
       >
         <DataSource live={graph.live} loading={graph.loading} />
         <button
@@ -101,25 +115,31 @@ export default function OntologyExplorer() {
             attackOnly ? 'border-status-critical/50 bg-status-critical/10 text-danger' : 'border-border text-ink-2 hover:text-ink',
           )}
         >
-          {attackOnly ? 'Showing INC-042 attack path' : 'Isolate attack path'}
+          {attackOnly ? 'Showing attack path' : 'Isolate attack path'}
         </button>
       </PageHeader>
 
       <div className="relative h-[calc(100dvh-230px)] min-h-[480px] overflow-hidden rounded-lg border border-border bg-surface">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
-          onNodeClick={(_, node) => setSelected((node as FlowNode).data.ont)}
-          onPaneClick={() => setSelected(null)}
-          colorMode="dark"
-        >
-          <Background gap={24} size={1} color="#21262d" />
-          <Controls position="bottom-left" />
-          <MiniMap pannable zoomable className="!bg-bg" nodeColor={(n) => TYPE_META[(n as FlowNode).data.ont.type].color} />
-        </ReactFlow>
+        {ontNodes.length === 0 ? (
+          <div className="flex h-full items-center justify-center px-6 text-center font-mono text-xs text-ink-3">
+            No ontology objects yet. Connect a source to start building the graph.
+          </div>
+        ) : (
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            fitView
+            proOptions={{ hideAttribution: true }}
+            onNodeClick={(_, node) => setSelected((node as FlowNode).data.ont)}
+            onPaneClick={() => setSelected(null)}
+            colorMode="dark"
+          >
+            <Background gap={24} size={1} color="#21262d" />
+            <Controls position="bottom-left" />
+            <MiniMap pannable zoomable className="!bg-bg" nodeColor={(n) => TYPE_META[(n as FlowNode).data.ont.type].color} />
+          </ReactFlow>
+        )}
 
         {/* Legend */}
         <div className="absolute top-3 left-3 rounded-md border border-border bg-bg/90 p-3 backdrop-blur">

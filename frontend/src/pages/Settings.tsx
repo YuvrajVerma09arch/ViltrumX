@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { UserPlus, Check } from 'lucide-react'
 import { PageHeader, Card, Table, Td, Badge, Button, Segmented, Toggle } from '../components/ui'
-import { MEMBERS, INVOICES } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import { cn } from '../lib/utils'
+
+// Shapes served by /members and /billing/invoices. Declared locally so this
+// page has no dependency on the demo fixtures in `data/mock.ts`.
+type Member = { name: string; email: string; role: string; last: string }
+type Invoice = { id: string; period: string; amount: string; gst: string; status: string }
 
 type Tab = 'team' | 'tenant' | 'billing'
 
@@ -19,8 +23,8 @@ const PLANS = [
 ]
 
 export default function Settings() {
-  const members = useApi<typeof MEMBERS>(() => endpoints.members(), MEMBERS)
-  const invoices = useApi<typeof INVOICES>(() => endpoints.invoices(), INVOICES)
+  const members = useApi<Member[]>(() => endpoints.members(), [])
+  const invoices = useApi<Invoice[]>(() => endpoints.invoices(), [])
 
   const [tab, setTab] = useState<Tab>('team')
   const [whatsapp, setWhatsapp] = useState(true)
@@ -47,6 +51,11 @@ export default function Settings() {
             }
           >
             <Table head={['Member', 'Role', 'Last active']}>
+              {members.data.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="px-3 py-10 text-center font-mono text-xs text-ink-3">No members yet.</td>
+                </tr>
+              )}
               {members.data.map((m) => (
                 <tr key={m.email} className="hover:bg-surface-2/50">
                   <Td>
@@ -148,6 +157,11 @@ export default function Settings() {
           </div>
           <Card title="Invoices — GST · UPI autopay via Razorpay" padded={false}>
             <Table head={['Invoice', 'Period', 'Amount', 'Tax', 'Status']}>
+              {invoices.data.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-3 py-10 text-center font-mono text-xs text-ink-3">No invoices yet.</td>
+                </tr>
+              )}
               {invoices.data.map((inv) => (
                 <tr key={inv.id} className="hover:bg-surface-2/50">
                   <Td className="font-mono text-xs">{inv.id}</Td>

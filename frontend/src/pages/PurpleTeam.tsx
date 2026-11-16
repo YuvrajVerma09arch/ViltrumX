@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Swords, Play, Loader2, CalendarClock } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { PageHeader, Card, StatusPill, Button, StatTile, DataSource } from '../components/ui'
-import { PT_SCENARIOS, READINESS_HISTORY } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
 
@@ -12,7 +11,19 @@ const TOOLTIP_STYLE = {
   fontFamily: 'JetBrains Mono', fontSize: 12, color: '#e6edf3',
 }
 
-type Scenario = (typeof PT_SCENARIOS)[number]
+// Shapes served by /purple/scenarios and /purple/scenarios/:id/run. Declared
+// locally instead of deriving from the demo fixture in `data/mock.ts`, so a
+// real tenant never inherits the demo organization's scenario data.
+type Scenario = {
+  id: string
+  name: string
+  desc: string
+  lastRun: string
+  result: string
+  detection: string
+  containment: string
+}
+type ReadinessPoint = { week: string; score: number }
 
 // "41 s" / "6 m 02 s" / "—" → seconds (or null when not run yet).
 function toSeconds(s: string): number | null {
@@ -36,12 +47,22 @@ export default function PurpleTeam() {
   // old hardcoded "38 s / 2 m 51 s" feedback after a run.
   const [runResults, setRunResults] = useState<Record<string, Scenario>>({})
 
-  const scenarios = useApi<typeof PT_SCENARIOS>(() => endpoints.purpleScenarios(), PT_SCENARIOS)
-  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+  // Empty defaults: a failed request or a tenant with no purple-team data must
+  // render an honest empty state, never the PayKraft demo fixtures.
+  const scenarios = useApi<Scenario[]>(() => endpoints.purpleScenarios(), [])
+  const readiness = useApi<ReadinessPoint[]>(() => endpoints.readiness(), [])
 
-  // Live-derived stats — no more hardcoded "4" / "49 s" / "94%".
-  const readinessScore = readiness.data.length ? readiness.data[readiness.data.length - 1].score : 94
+  // Live-derived stats — no hardcoded "4" / "49 s" / "94%" / "118" fallbacks.
+  const lastReadiness = readiness.data[readiness.data.length - 1]
+  const readinessScore = lastReadiness ? `${lastReadiness.score}%` : '—'
+  const readinessHint = lastReadiness
+    ? 'computed live from the purple-team pass rate'
+    : 'no readiness data yet'
   const scenarioCount = scenarios.data.length
+  const flaggedCount = scenarios.data.filter((s) => s.result === 'warning').length
+  const scenarioHint = scenarioCount
+    ? `${flaggedCount} flagged for tuning`
+    : 'no scenarios recorded yet'
   const medianDetection = fmtMedian(
     scenarios.data.map((s) => toSeconds(runResults[s.id]?.detection ?? s.detection)).filter((x): x is number => x !== null),
   )
@@ -79,15 +100,18 @@ export default function PurpleTeam() {
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Defense readiness" value={`${readinessScore}%`} hint="computed live from the purple-team pass rate" tone="good" />
-        <StatTile label="Scenarios in rotation" value={String(scenarioCount)} hint="1 flagged for tuning (PT-03)" tone="accent" />
+        <StatTile label="Defense readiness" value={readinessScore} hint={readinessHint} tone="good" />
+        <StatTile label="Scenarios in rotation" value={String(scenarioCount)} hint={scenarioHint} tone="accent" />
         <StatTile label="Median detection" value={medianDetection} hint="across the scenario rotation" tone="good" />
-        <StatTile label="Attacks simulated (30d)" value="118" hint="all in isolated purple-team scope" tone="neutral" />
+        <StatTile label="Attacks simulated (30d)" value="—" hint="no simulation data yet" tone="neutral" />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card title="Scenario library" className="xl:col-span-2" padded={false}>
           <ul className="divide-y divide-border-subtle">
+            {scenarios.data.length === 0 && (
+              <li className="px-4 py-10 text-center font-mono text-xs text-ink-3">No scenarios recorded yet.</li>
+            )}
             {scenarios.data.map((s) => (
               <li key={s.id} className="px-4 py-3.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -125,23 +149,29 @@ export default function PurpleTeam() {
 
         <div className="space-y-4">
           <Card title="Readiness trend — 6 weeks">
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={readiness.data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
-                <CartesianGrid stroke="#21262d" vertical={false} />
-                <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
-                <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
-                <Line name="readiness" type="monotone" dataKey="score" stroke="#199e70" strokeWidth={2} dot={{ r: 3, fill: '#199e70', stroke: '#161b22', strokeWidth: 2 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            {readiness.data.length === 0 ? (
+              <div className="flex h-[180px] items-center justify-center font-mono text-xs text-ink-3">
+                No readiness data yet.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={readiness.data} margin={{ top: 8, right: 8, bottom: 0, left: -22 }}>
+                  <CartesianGrid stroke="#21262d" vertical={false} />
+                  <XAxis dataKey="week" tick={AXIS_TICK} axisLine={{ stroke: '#383f47' }} tickLine={false} />
+                  <YAxis domain={[60, 100]} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ stroke: '#383f47' }} />
+                  <Line name="readiness" type="monotone" dataKey="score" stroke="#199e70" strokeWidth={2} dot={{ r: 3, fill: '#199e70', stroke: '#161b22', strokeWidth: 2 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
             <p className="mt-2 text-xs text-ink-3">Score = weighted pass rate × detection speed × containment speed, over the full scenario rotation.</p>
           </Card>
 
           <Card title="Why this matters">
             <p className="text-sm leading-relaxed text-ink-2">
-              Last night the system ran the <span className="font-mono text-ink">exact chain from INC-042</span> against
-              itself — and caught it in 41 seconds. When you raise the autonomy dial, you're not trusting a
-              promise; you're trusting a nightly, evidenced pass rate.
+              Every night the system runs its scenario set against the real detection pipeline and publishes
+              the score. When you raise the autonomy dial, you're not trusting a promise — you're trusting an
+              evidenced pass rate.
             </p>
           </Card>
         </div>
