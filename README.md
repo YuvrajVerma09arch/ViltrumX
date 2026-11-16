@@ -212,16 +212,6 @@ One marketing landing page + 12 product screens (the rubric requires 10+ product
 
 ---
 
-## 8. What's real today vs. what's next
-
-| Piece | Status | Built by |
-|---|---|---|
-| Frontend — all 13 screens, running on mock data (`frontend/src/data/mock.ts`) | ✅ done | Claude |
-| Backend shell — Django project (7 apps), JWT auth, every v1 endpoint live on demo fixtures, 11 contract tests, `seed_demo` command | ✅ done | Claude |
-| CI/CD — 4 GitHub workflows, Docker Compose local + staging, pre-commit hooks | ✅ live | Claude |
-| Backend real logic — DB models, policy gate, Neo4j sync, connectors, ML | ⬜ Weeks 1–3 | Yuvraj (Claude reviews) |
-| Orchestrator — the 8 agents (LangGraph) | ⬜ Week 3 | Yuvraj + Claude pairing |
-| LLM narratives, Hindi/Gujarati rendering, purple team, compliance PDFs | ⬜ Week 4 | Yuvraj (Claude pairs on wiring) |
 
 ### How fake becomes real — the one trick to internalize
 
