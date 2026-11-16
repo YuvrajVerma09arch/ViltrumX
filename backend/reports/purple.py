@@ -63,8 +63,12 @@ def run_scenario(tenant, scenario_id: str):
     scenario.detection_seconds = detection_s
     scenario.containment_seconds = containment_s
     scenario.save()
-
-    _update_readiness(tenant)
+    # Note: we do NOT recompute the Defense Readiness Score here. Readiness is
+    # a nightly aggregate (the UI's "nightly sweep 03:00 IST"), so a single
+    # manual run updates this scenario's timings but not the headline score —
+    # that would make the score jump around on every click. run_all_scenarios
+    # (the nightly Celery beat job) calls _update_readiness once after the
+    # full rotation.
 
     return {
         "id": scenario.external_id, "name": scenario.name, "desc": scenario.desc,
@@ -93,6 +97,8 @@ def run_all_scenarios(tenant):
             run_scenario(tenant, scenario.external_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("purple run failed for %s: %s", scenario.external_id, exc)
+    # Readiness is recomputed once, after the full rotation — not per click.
+    _update_readiness(tenant)
 
 
 def _run_synthetic(tenant, scenario_key: str) -> tuple[int, int]:

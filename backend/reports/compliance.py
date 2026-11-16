@@ -7,8 +7,26 @@ provenance trace, bilingual EN/HI.
 """
 
 from django.utils import timezone
+from io import BytesIO
+import os
 
 from core import demo_data
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
+# Register Unicode font for Hindi/Devanagari support
+FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+HINDI_FONT_PATH = os.path.join(FONT_DIR, "NotoSansDevanagari-Regular.ttf")
+if os.path.exists(HINDI_FONT_PATH):
+    pdfmetrics.registerFont(TTFont("NotoSansDevanagari", HINDI_FONT_PATH))
+    HINDI_FONT = "NotoSansDevanagari"
+else:
+    HINDI_FONT = "Helvetica"  # fallback (will show boxes for Hindi)
 
 KNOWN_FRAMEWORKS = {f["id"]: f for f in demo_data.FRAMEWORKS}
 
@@ -42,6 +60,85 @@ def generate_export(tenant, framework_id: str, actor: str):
         content=content,
     )
     return {"name": export.name, "kind": export.kind, "when": export.when_label}
+
+
+def generate_pdf(tenant, framework_id: str) -> BytesIO:
+    """Generate actual PDF bytes for download."""
+    if framework_id == "certin":
+        content = _certin_pack(tenant, timezone.now())
+    elif framework_id == "dpdp":
+        content = _dpdp_pack(tenant, timezone.now())
+    else:
+        content = {"framework": framework_id, "error": "Not implemented"}
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=2*cm, leftMargin=2*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=16, spaceAfter=12)
+    heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=12, spaceAfter=6, spaceBefore=12)
+    body_style = ParagraphStyle('CustomBody', parent=styles['Normal'], fontSize=10, spaceAfter=4, leading=14)
+    hindi_style = ParagraphStyle('HindiBody', parent=body_style, fontName=HINDI_FONT, fontSize=10, spaceAfter=4, leading=14, textColor=colors.grey)
+
+    story = []
+
+    # Title
+    story.append(Paragraph(content.get("framework", "Compliance Report"), title_style))
+    story.append(Paragraph(f"Tenant: {tenant.name} ({tenant.slug})", body_style))
+    story.append(Paragraph(f"Generated: {timezone.now().strftime('%d %b %Y %H:%M IST')}", body_style))
+    story.append(Spacer(1, 12))
+
+    if framework_id == "certin":
+        story.append(Paragraph("CERT-In Directions 2022 — Cyber Security Incident Report", heading_style))
+        story.append(Spacer(1, 6))
+        fields = content.get("fields", {})
+        for key, label in [
+            ("1_incident_type", "1. Incident Type"),
+            ("2_date_time_of_incident", "2. Date & Time of Incident"),
+            ("3_date_time_of_detection", "3. Date & Time of Detection"),
+            ("4_affected_systems", "4. Affected Systems"),
+            ("5_nature_of_incident", "5. Nature of Incident"),
+            ("6_actions_taken", "6. Actions Taken"),
+        ]:
+            if key in fields:
+                val = fields[key]
+                if isinstance(val, list):
+                    val = "<br/>".join(f"• {v}" for v in val)
+                story.append(Paragraph(f"<b>{label}:</b> {val}", body_style))
+                story.append(Spacer(1, 4))
+
+        story.append(Spacer(1, 12))
+        story.append(Paragraph("<b>हिंदी सारांश / Hindi Summary</b>", heading_style))
+        story.append(Paragraph(content.get("hindi_summary", ""), hindi_style))
+
+    elif framework_id == "dpdp":
+        story.append(Paragraph("Digital Personal Data Protection Act 2023 — Evidence Pack", heading_style))
+        story.append(Spacer(1, 6))
+        for key, label in [
+            ("data_fiduciary", "Data Fiduciary"),
+            ("personal_data_involved", "Personal Data Involved"),
+            ("breach_occurred", "Breach Occurred"),
+            ("breach_prevented_by", "Breach Prevented By"),
+            ("notification_required", "Notification Required"),
+            ("notification_reason", "Notification Reason"),
+            ("controls_mapped", "Controls Mapped"),
+            ("controls_total", "Controls Total"),
+            ("gap_list", "Gap List"),
+        ]:
+            if key in content:
+                val = content[key]
+                if isinstance(val, list):
+                    val = "<br/>".join(f"• {v}" for v in val)
+                story.append(Paragraph(f"<b>{label}:</b> {val}", body_style))
+                story.append(Spacer(1, 4))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 
 def _certin_pack(tenant, now) -> dict:

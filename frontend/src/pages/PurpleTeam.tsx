@@ -12,12 +12,39 @@ const TOOLTIP_STYLE = {
   fontFamily: 'JetBrains Mono', fontSize: 12, color: '#e6edf3',
 }
 
+type Scenario = (typeof PT_SCENARIOS)[number]
+
+// "41 s" / "6 m 02 s" / "—" → seconds (or null when not run yet).
+function toSeconds(s: string): number | null {
+  if (!s || s === '—') return null
+  const m = s.match(/(?:(\d+)\s*m\s*)?(\d+)\s*s/)
+  if (!m) return null
+  return (m[1] ? parseInt(m[1], 10) * 60 : 0) + parseInt(m[2], 10)
+}
+function fmtMedian(values: number[]): string {
+  if (!values.length) return '—'
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = sorted[Math.floor(sorted.length / 2)]
+  if (mid >= 60) return `${Math.floor(mid / 60)} m ${String(mid % 60).padStart(2, '0')} s`
+  return `${mid} s`
+}
+
 export default function PurpleTeam() {
   const [running, setRunning] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  // Real run responses from the backend, keyed by scenario id — replaces the
+  // old hardcoded "38 s / 2 m 51 s" feedback after a run.
+  const [runResults, setRunResults] = useState<Record<string, Scenario>>({})
 
   const scenarios = useApi<typeof PT_SCENARIOS>(() => endpoints.purpleScenarios(), PT_SCENARIOS)
   const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
+
+  // Live-derived stats — no more hardcoded "4" / "49 s" / "94%".
+  const readinessScore = readiness.data.length ? readiness.data[readiness.data.length - 1].score : 94
+  const scenarioCount = scenarios.data.length
+  const medianDetection = fmtMedian(
+    scenarios.data.map((s) => toSeconds(runResults[s.id]?.detection ?? s.detection)).filter((x): x is number => x !== null),
+  )
 
   // Really replays the scenario against the live detection pipeline; the
   // backend times detection + containment and returns the scored result.
@@ -25,7 +52,8 @@ export default function PurpleTeam() {
     setRunning(id)
     setDone(null)
     try {
-      await endpoints.runScenario(id)
+      const res = (await endpoints.runScenario(id)) as Scenario
+      setRunResults((prev) => ({ ...prev, [id]: res }))
       setDone(id)
       scenarios.reload()
       readiness.reload()
@@ -51,9 +79,9 @@ export default function PurpleTeam() {
       </PageHeader>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Defense readiness" value="94%" hint="last validated 03:24 IST today" tone="good" />
-        <StatTile label="Scenarios in rotation" value="4" hint="1 flagged for tuning (PT-03)" tone="accent" />
-        <StatTile label="Median detection" value="49 s" hint="across last night's sweep" tone="good" />
+        <StatTile label="Defense readiness" value={`${readinessScore}%`} hint="computed live from the purple-team pass rate" tone="good" />
+        <StatTile label="Scenarios in rotation" value={String(scenarioCount)} hint="1 flagged for tuning (PT-03)" tone="accent" />
+        <StatTile label="Median detection" value={medianDetection} hint="across the scenario rotation" tone="good" />
         <StatTile label="Attacks simulated (30d)" value="118" hint="all in isolated purple-team scope" tone="neutral" />
       </div>
 
@@ -80,9 +108,9 @@ export default function PurpleTeam() {
                 </div>
                 <p className="mt-1.5 text-xs text-ink-2">{s.desc}</p>
                 <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px] text-ink-3">
-                  <span>{done === s.id ? 'just now' : s.lastRun}</span>
-                  <span>detection: <span className="text-ink-2">{done === s.id ? '38 s' : s.detection}</span></span>
-                  <span>containment: <span className="text-ink-2">{done === s.id ? '2 m 51 s' : s.containment}</span></span>
+                  <span>{runResults[s.id]?.lastRun ?? (done === s.id ? 'Just now' : s.lastRun)}</span>
+                  <span>detection: <span className="text-ink-2">{runResults[s.id]?.detection ?? s.detection}</span></span>
+                  <span>containment: <span className="text-ink-2">{runResults[s.id]?.containment ?? s.containment}</span></span>
                 </div>
                 {s.result === 'warning' && done !== s.id && (
                   <p className="mt-2 rounded-md border border-status-warning/25 bg-status-warning/5 px-3 py-2 text-xs text-ink-2">

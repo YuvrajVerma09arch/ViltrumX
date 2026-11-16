@@ -9,20 +9,48 @@ import { useApi } from '../lib/hooks'
 export default function Reports() {
   const [exporting, setExporting] = useState<string | null>(null)
   const [exported, setExported] = useState<string[]>([])
+  const [exportNames, setExportNames] = useState<Record<string, string>>({})
 
   const frameworks = useApi<typeof FRAMEWORKS>(() => endpoints.frameworks(), FRAMEWORKS)
   const recent = useApi<typeof RECENT_EXPORTS>(() => endpoints.exports(), RECENT_EXPORTS)
 
   // Generates the evidence pack server-side from the provenance trace, then
-  // refreshes the recent-exports list so the new pack appears.
+  // refreshes the recent-exports list so the new pack appears. We keep the
+  // server's response so the filename shown is the real one, not a placeholder.
   async function doExport(id: string) {
     setExporting(id)
     try {
-      await endpoints.exportFramework(id)
+      const res = (await endpoints.exportFramework(id)) as { name?: string }
       setExported((x) => [...x, id])
+      if (res?.name) setExportNames((x) => ({ ...x, [id]: res.name as string }))
       recent.reload()
     } finally {
       setExporting(null)
+    }
+  }
+
+  // Triggers actual PDF download from the backend
+  async function downloadPdf(id: string) {
+    try {
+      const url = endpoints.downloadFramework(id)
+      const token = localStorage.getItem('viltrumx.access')
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+      const blob = await res.blob()
+      const filename = `${id}-evidence-pack-${new Date().toISOString().split('T')[0]}.pdf`
+      const objectUrl = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = objectUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(objectUrl)
+    } catch (err) {
+      console.error('PDF download failed:', err)
+      alert('Failed to download PDF. Is the API running?')
     }
   }
 
@@ -52,18 +80,23 @@ export default function Reports() {
                 {exporting === f.id
                   ? <><Loader2 size={13} className="animate-spin" aria-hidden /> generating…</>
                   : exported.includes(f.id)
-                    ? 'Exported ✓'
-                    : <><FileDown size={13} aria-hidden /> Export evidence pack (PDF)</>}
+                    ? 'Generated ✓'
+                    : <><FileDown size={13} aria-hidden /> Generate evidence pack</>}
               </Button>
               {f.id === 'certin' && (
                 <Link to="/app/investigation">
                   <Button size="sm" variant="outline">Preview bilingual narrative</Button>
                 </Link>
               )}
+              {exported.includes(f.id) && (
+                <Button size="sm" variant="outline" onClick={() => downloadPdf(f.id)}>
+                  <FileDown size={13} aria-hidden /> Download PDF
+                </Button>
+              )}
             </div>
             {exported.includes(f.id) && (
               <p className="mt-2.5 rounded-md border border-accent/25 bg-accent-dim/40 px-3 py-2 font-mono text-[11px] text-accent-bright">
-                {f.name.split(' ')[0].toLowerCase()}-evidence-2026-07-09.pdf · signed manifest · stored in audit vault
+                {exportNames[f.id] ?? `${f.id} evidence pack`} · ready for download
               </p>
             )}
           </Card>

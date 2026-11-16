@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ShieldAlert, BellOff, Zap, Target, ArrowRight } from 'lucide-react'
 import { PageHeader, Card, StatTile, SeverityBadge, StatusPill, Badge, DataSource } from '../components/ui'
-import { AGENTS, INCIDENTS, ACTIVITY_FEED, type Agent, type Incident, type Action } from '../data/mock'
+import { AGENTS, INCIDENTS, ACTIVITY_FEED, READINESS_HISTORY, type Agent, type Incident, type Action } from '../data/mock'
 import { endpoints } from '../lib/api'
 import { useApi, useLiveFeed, type FeedLine } from '../lib/hooks'
 import { cn } from '../lib/utils'
@@ -12,6 +12,7 @@ export default function CommandDeck() {
   const incidents = useApi<Incident[]>(() => endpoints.incidents(), INCIDENTS)
   const actions = useApi<Action[]>(() => endpoints.actions(), [])
   const seed = useApi<FeedLine[]>(() => endpoints.feed(), ACTIVITY_FEED as FeedLine[])
+  const readiness = useApi<typeof READINESS_HISTORY>(() => endpoints.readiness(), READINESS_HISTORY)
   const { lines, connected } = useLiveFeed(seed.data)
 
   // Stat tiles are derived from the same data the tables show, so they can
@@ -53,7 +54,7 @@ export default function CommandDeck() {
         <StatTile label="Open incidents" value={String(stats.open)} hint={stats.openHint} tone="critical" icon={ShieldAlert} />
         <StatTile label="Alerts suppressed (24h)" value="303 / 312" hint="97.1% noise-gated before human eyes" tone="good" icon={BellOff} />
         <StatTile label="Actions fired (24h)" value={String(stats.fired)} hint={stats.firedHint} tone="accent" icon={Zap} />
-        <StatTile label="Defense readiness" value="94%" hint="validated last night by purple team" tone="good" icon={Target} />
+        <StatTile label="Defense readiness" value={`${readiness.data.length ? readiness.data[readiness.data.length - 1].score : 94}%`} hint="computed live from the purple-team pass rate" tone="good" icon={Target} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-5">
