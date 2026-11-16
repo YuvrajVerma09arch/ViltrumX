@@ -19,11 +19,13 @@ htmlcov/
 .env.*
 !.env.example
 
-# Editors / OS
+# Editors / OS / agent tooling / planning notes
 .DS_Store
 .idea/
 .vscode/
 *.swp
+.opencode/
+tasks/
 
 # Data stores (local volumes if mapped into repo)
 neo4j_data/
