@@ -3,12 +3,12 @@
 # Kept out of requirements.txt so CI and the docker image stay fast/small
 # until these are actually imported.
 
-scikit-learn>=1.5
-xgboost>=2.1
-lightgbm>=4.5
-hdbscan>=0.8.38
-sentence-transformers>=3.0
-qdrant-client>=1.11
+# scikit-learn>=1.5
+# xgboost>=2.1
+# lightgbm>=4.5
+# hdbscan>=0.8.38
+# sentence-transformers>=3.0
+# qdrant-client>=1.11
 
 # Agents / explanation layer (provider-agnostic: Groq default, Ollama sovereign)
 langgraph>=0.2

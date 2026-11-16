@@ -28,9 +28,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-# Privatized-known anchors from the synthetic generator (backend/connectors/synthetic.py)
+# Geo/IP signals are DERIVED via detection.enrichment (GeoIP + reputation),
+# not hardcoded. OFFICE_GEO_PREFIX matches the seeded "IN-KA" geo labels and
+# the enrichment layer's "IN" country ISO for trusted office/private IPs.
 OFFICE_GEO_PREFIX = "IN-"
-MOSCOW_IP = "185.220.101.34"
 NIGHT_BUCKET_TARGETS = {"customers-db-backups", "paykraft-staging-assets"}
 
 
@@ -56,12 +57,43 @@ def _is_weekend(event) -> int:
 
 
 def _geo_mismatch(event) -> int:
+    """1 when the event's geography is outside the tenant's home region.
+
+    Derived from the enrichment layer (GeoIP + reputation), not a constant:
+      - an explicit `geo` label on the event (Workspace "IN-KA" / "RU-MOW")
+        is honoured directly when present;
+      - otherwise the source IP is looked up (CloudTrail/GitHub events carry
+        no geo, so this is where an IP-only event gets located);
+      - a known-bad IP is a mismatch regardless of claimed geo.
+    Private/unknown IPs and home-region geo resolve to 0 (fail toward no alarm
+    on internal traffic).
+    """
+    from detection.enrichment import is_foreign, lookup_ip
+
     geo = (getattr(event, "geo", "") or "")
     ip = getattr(event, "ip", None)
-    if not geo:
-        # CloudTrail events don't carry geo; resolve via known-bad IP for the demo
-        return 1 if ip == MOSCOW_IP else 0
-    return 0 if geo.startswith(OFFICE_GEO_PREFIX) else 1
+
+    # A threat-intel-flagged IP is a mismatch no matter what geo claims.
+    if ip and lookup_ip(ip).is_known_bad:
+        return 1
+
+    if geo:
+        return 0 if geo.startswith(OFFICE_GEO_PREFIX) else 1
+
+    # No geo label → locate via the source IP.
+    return 1 if is_foreign(ip) else 0
+
+
+def _event_country(event) -> str:
+    """Best-effort country for an event: its `geo` label first, else GeoIP on
+    the source IP. Returns "" when unknowable (never raises)."""
+    from detection.enrichment import lookup_ip
+
+    geo = (getattr(event, "geo", "") or "")
+    if geo:
+        return geo
+    ip = getattr(event, "ip", None)
+    return lookup_ip(ip).country_iso if ip else ""
 
 
 def _impossible_travel(event, prior_logins) -> int:
@@ -74,9 +106,13 @@ def _impossible_travel(event, prior_logins) -> int:
     if prev is None or ip is None:
         return 0
     prev_ip, prev_ts, prev_geo = prev
-    both_at_office = prev_geo.startswith(OFFICE_GEO_PREFIX) and (
-        getattr(event, "geo", "") or ""
-    ).startswith(OFFICE_GEO_PREFIX)
+
+    cur_country = _event_country(event)
+    prev_country = prev_geo or ""
+
+    both_at_office = prev_country.startswith(OFFICE_GEO_PREFIX) and cur_country.startswith(
+        OFFICE_GEO_PREFIX
+    )
     if ip == prev_ip or both_at_office:
         return 0
     if not isinstance(prev_ts, type(occ)):  # tz mismatch guard

@@ -132,11 +132,15 @@ def _score_random_forest(features) -> float | None:
 
 def _heuristic(event) -> float:
     """Rule-based fallback — deterministic, no ML dependency. Reproduces the
-    behaviour the demo advertises before train_models has been run."""
+    behaviour the demo advertises before train_models has been run. Geography
+    and IP reputation are derived from detection.enrichment, not a constant."""
+    from detection.enrichment import lookup_ip
+
     if getattr(event, "is_attack", False):
         return 0.94
     geo = (getattr(event, "geo", "") or "")
-    if "RU" in geo or getattr(event, "ip", "") == "185.220.101.34":
+    res = lookup_ip(getattr(event, "ip", None))
+    if res.is_known_bad or (geo and not geo.startswith("IN-")):
         return 0.91
     hour = event.occurred_at.hour if hasattr(event, "occurred_at") and event.occurred_at else 12
     if hour < 5:

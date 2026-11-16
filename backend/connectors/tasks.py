@@ -97,9 +97,13 @@ def _score(event: RawEvent):
         event.save(update_fields=["anomaly_score"])
     except Exception as exc:  # noqa: BLE001
         logger.debug("scorer unavailable, using heuristic: %s", exc)
-        # Heuristic: flag impossible-travel IPs and S3 burst
+        # Heuristic fallback: a threat-intel-flagged IP, an S3 backup-bucket
+        # burst, or ground-truth attack → high anomaly. IP reputation is
+        # derived from detection.enrichment, not a hardcoded address.
+        from detection.enrichment import lookup_ip
+
         suspicious = (
-            event.ip in ("185.220.101.34",)
+            lookup_ip(event.ip).is_known_bad
             or (event.event_type == "GetObject" and event.target == "customers-db-backups")
             or event.is_attack
         )

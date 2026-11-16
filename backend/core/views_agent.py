@@ -557,6 +557,19 @@ def _serialize_correlated(event: RawEvent) -> dict:
     }
 
 
+def _is_foreign_or_bad(event: RawEvent) -> bool:
+    """True when a login's geography/IP is outside the home region or the IP is
+    threat-intel-flagged — derived via detection.enrichment, not a constant."""
+    from detection.enrichment import is_foreign, lookup_ip
+
+    geo = (event.geo or "")
+    if geo and not geo.startswith("IN-"):
+        return True
+    if event.ip and (lookup_ip(event.ip).is_known_bad or is_foreign(event.ip)):
+        return True
+    return False
+
+
 def _classify(event: RawEvent) -> str | None:
     etype = event.event_type or ""
     elow = etype.lower()
@@ -569,7 +582,7 @@ def _classify(event: RawEvent) -> str | None:
                 return "mfa_fatigue"
         except (TypeError, ValueError):
             pass
-    if "login" in elow and ("RU" in (event.geo or "") or "185.220" in (event.ip or "")):
+    if "login" in elow and _is_foreign_or_bad(event):
         return "impossible_travel"
     if "personal_access_token" in elow or "personal_access_token.create" == elow:
         return "token_creation"
