@@ -24,11 +24,32 @@ from core.tenancy import tenant_for
 
 logger = logging.getLogger(__name__)
 
+# Narrow, explicitly documented fallback for the viva walkthrough only — see
+# _demo_tenant_for_org(). Nothing here is ever matched as a substring.
+DEMO_TENANT_SLUG = "paykraft"
+DEMO_GITHUB_ORG_LOGIN = "paykraft"
+
+
+def _webhook_secret() -> str:
+    return getattr(settings, "GITHUB_WEBHOOK_SECRET", "") or ""
+
+
+def _webhook_secret_missing() -> bool:
+    """A production deployment must never accept unsigned webhooks (fail closed)."""
+    return not settings.DEBUG and not _webhook_secret()
+
 
 def _verify_signature(body: bytes, header: str | None) -> bool:
-    secret = getattr(settings, "GITHUB_WEBHOOK_SECRET", "")
+    """Validate GitHub's HMAC-SHA256 signature.
+
+    With no secret configured the only path that still accepts a request is the
+    DEBUG dev mock. Production callers are rejected with 503 by
+    ``_webhook_secret_missing`` before this is called; returning DEBUG here
+    keeps that guarantee in one place and preserves local dev behaviour.
+    """
+    secret = _webhook_secret()
     if not secret:
-        return True  # dev: no secret configured → accept all
+        return bool(settings.DEBUG)
     if not header or not header.startswith("sha256="):
         return False
     expected = "sha256=" + hmac.new(
@@ -87,6 +108,13 @@ class GitHubWebhookView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        # Never accept unsigned webhooks in production: an unconfigured secret
+        # is a server misconfiguration, not permission to trust the payload.
+        if _webhook_secret_missing():
+            logger.error("GitHub webhook rejected: GITHUB_WEBHOOK_SECRET is not configured.")
+            return Response(
+                {"detail": "GitHub webhook secret is not configured."}, status=503
+            )
         sig = request.headers.get("X-Hub-Signature-256")
         if not _verify_signature(request.body, sig):
             return Response({"detail": "Invalid signature."}, status=401)
@@ -125,8 +153,12 @@ class GitHubOAuthStartView(APIView):
         state = secrets.token_urlsafe(32)
         _store_oauth_state(state, tenant.id)
 
-        # Development mode: if GitHub OAuth not configured, return a mock auth_url
+        # Development mode: if GitHub OAuth not configured, return a mock auth_url.
+        # Production must fail closed rather than hand out a mock flow that mints
+        # a fake "connected" connector.
         if not _is_github_configured():
+            if not settings.DEBUG:
+                return Response({"detail": "GitHub OAuth is not configured."}, status=503)
             default_redirect = "http://localhost:8000/api/v1/connectors/gh/oauth/callback"
             redirect_uri = getattr(
                 settings,
@@ -163,7 +195,12 @@ class GitHubOAuthCallbackView(APIView):
         if tenant_id is None:
             return Response({"detail": "Invalid or expired OAuth state."}, status=400)
 
-        # Development mode: mock code skips GitHub API calls
+        # Mock codes are a DEBUG-only dev affordance. Outside DEBUG they must
+        # never mint a "connected" GitHub connector — reject them outright.
+        if code.startswith("demo-code-") and not settings.DEBUG:
+            return Response(
+                {"detail": "Mock OAuth codes are not accepted outside DEBUG."}, status=400
+            )
         is_mock = code.startswith("demo-code-")
 
         access_token = "mock-token"
@@ -276,8 +313,38 @@ class GitHubOAuthDisconnectView(APIView):
 
 
 def _tenant_for_org(org: str):
-    slug = org.lower().replace("-", "")
-    return Tenant.objects.filter(slug__icontains=slug).first()
+    """Resolve the tenant from an *installed* GitHub connector, exactly.
+
+    The previous implementation guessed the tenant with ``slug__icontains`` on
+    a dash-stripped org name. That could route one organization's webhook into
+    an unrelated tenant whose slug merely contained the org as a substring.
+    We now require an exact (case-insensitive) match against the
+    ``github_org_login`` recorded on a ``gh`` Connector.
+    """
+    if not org:
+        return None
+    connector = (
+        Connector.objects.filter(connector_id="gh", github_org_login__iexact=org)
+        .select_related("tenant")
+        .first()
+    )
+    if connector is not None:
+        return connector.tenant
+    return _demo_tenant_for_org(org)
+
+
+def _demo_tenant_for_org(org: str):
+    """Demo-only fallback for the viva walkthrough.
+
+    The seeded viva demo tenant's ``gh`` connector has no ``github_org_login``
+    (seed_demo sets only name/status), so replayed demo webhooks for the demo
+    org would not resolve through the connector lookup. This fallback is
+    deliberately tight: an EXACT org-login match against a single hardcoded
+    demo slug, never a substring, so no other tenant can be picked by accident.
+    """
+    if org.casefold() != DEMO_GITHUB_ORG_LOGIN.casefold():
+        return None
+    return Tenant.objects.filter(slug=DEMO_TENANT_SLUG).first()
 
 
 def _extract_fields(event_type: str, payload: dict) -> dict:
