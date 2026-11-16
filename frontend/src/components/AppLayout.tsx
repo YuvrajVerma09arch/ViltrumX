@@ -3,7 +3,7 @@ import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, TrendingUp, Network, Boxes, Search, SlidersHorizontal,
   History, Swords, FileCheck2, Settings, Bell, Plug, LogOut } from 'lucide-react'
-import { endpoints, logout } from '../lib/api'
+import { auth as authStore, endpoints, logout } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import type { Action } from '../data/mock'
 import { cn } from '../lib/utils'
@@ -59,12 +59,23 @@ function Logo() {
 export default function AppLayout() {
   const navigate = useNavigate()
   const [bellOpen, setBellOpen] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const bellRef = useRef<HTMLElement>(null)
+
+  // Listen for the 401-after-refresh-fail event dispatched by api.ts.
+  useEffect(() => {
+    const onExpired = () => setSessionExpired(true)
+    window.addEventListener('viltrumx:session-expired', onExpired)
+    return () => window.removeEventListener('viltrumx:session-expired', onExpired)
+  }, [])
 
   // Notifications are the real L4 queue, not a decorative dot: an action the
   // dial refused to auto-execute is precisely the thing a human must see.
   const actions = useApi<Action[]>(() => endpoints.actions(), [])
   const pending = actions.data.filter((a) => a.status === 'proposed')
+
+  const nameParts = (authStore.user?.name ?? 'A').trim().split(/\s+/)
+  const userInitials = ((nameParts[0]?.[0] ?? 'A') + (nameParts[nameParts.length - 1]?.[0] ?? 'A')).toUpperCase()
 
   // Close the panel on outside click / Escape.
   useEffect(() => {
@@ -129,12 +140,33 @@ export default function AppLayout() {
 
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col lg:pl-60">
+        {sessionExpired && (
+          <div className="flex items-center justify-between gap-3 border-b border-status-critical/40 bg-status-critical/10 px-5 py-2.5 text-sm">
+            <span className="text-danger">
+              Your session expired — some screens may be showing saved demo data. Log in again to see live data.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => { logout(); navigate('/login') }}
+                className="cursor-pointer rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:bg-accent-bright"
+              >
+                Log in again
+              </button>
+              <button
+                onClick={() => setSessionExpired(false)}
+                className="cursor-pointer rounded-md px-2 py-1.5 text-xs text-ink-2 hover:text-ink"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-bg/90 px-5 backdrop-blur">
-          {/* Single-tenant demo: this is a label, not a switcher. Rendering it
-              as a dead <button> invited clicks that did nothing. */}
           <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink-2">
-            <span className="grid h-5 w-5 place-items-center rounded bg-accent-dim font-mono text-[10px] font-bold text-accent-bright">P</span>
-            PayKraft Technologies
+            <span className="grid h-5 w-5 place-items-center rounded bg-accent-dim font-mono text-[10px] font-bold text-accent-bright">
+              {(authStore.tenant?.name ?? 'V')[0].toUpperCase()}
+            </span>
+            {authStore.tenant?.name ?? 'ViltrumX'}
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden font-mono text-[11px] text-ink-3 md:block">env: <span className="text-ink-2">demo-tenant</span> · ap-south-1</span>
@@ -199,8 +231,8 @@ export default function AppLayout() {
               )}
             </div>
 
-            <div className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface-2 font-mono text-xs font-semibold text-ink-2" aria-label="Arjun Mehta">
-              AM
+            <div className="grid h-8 w-8 place-items-center rounded-full border border-border bg-surface-2 font-mono text-xs font-semibold text-ink-2" aria-label={authStore.user?.name ?? 'User'}>
+              {userInitials}
             </div>
             <button
               onClick={() => { logout(); navigate('/login') }}

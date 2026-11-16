@@ -2,14 +2,16 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from connectors.views import GitHubWebhookView
+from connectors.views import GitHubWebhookView, GitHubOAuthCallbackView, GitHubOAuthStartView
 from core import views as v
 from core import views_agent as va
+from core.serializers import CustomTokenObtainPairSerializer
 
 api_v1 = [
     # auth
-    path("auth/token", TokenObtainPairView.as_view(), name="token"),
+    path("auth/token", TokenObtainPairView.as_view(serializer_class=CustomTokenObtainPairSerializer), name="token"),
     path("auth/token/refresh", TokenRefreshView.as_view(), name="token-refresh"),
+    path("auth/register", v.RegisterView.as_view(), name="register"),
     # command deck
     path("agents/status", v.AgentStatusView.as_view(), name="agents-status"),
     path("feed", v.ActivityFeedView.as_view(), name="feed"),
@@ -39,6 +41,9 @@ api_v1 = [
         v.ConnectorConnectView.as_view(),
         name="connector-connect",
     ),
+    # GitHub OAuth connect flow
+    path("connectors/gh/oauth/start", GitHubOAuthStartView.as_view(), name="github-oauth-start"),
+    path("connectors/gh/oauth/callback", GitHubOAuthCallbackView.as_view(), name="github-oauth-callback"),
     path("ingest/replay", v.IngestReplayView.as_view(), name="ingest-replay"),
     path(
         "ingest/scenario/<str:scenario>",
@@ -74,6 +79,11 @@ api_v1 = [
         "compliance/<str:framework_id>/export",
         v.ComplianceExportView.as_view(),
         name="compliance-export",
+    ),
+    path(
+        "compliance/<str:framework_id>/download",
+        v.ComplianceExportDownloadView.as_view(),
+        name="compliance-download",
     ),
     # settings
     path("members", v.MemberListView.as_view(), name="members"),

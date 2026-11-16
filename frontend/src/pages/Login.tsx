@@ -2,15 +2,26 @@ import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ShieldCheck, Loader2 } from 'lucide-react'
 import { Button } from '../components/ui'
-import { login } from '../lib/api'
+import { login, register } from '../lib/api'
 
 export default function Login() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('arjun.mehta@paykraft.in')
   const [password, setPassword] = useState('viltrumx-demo')
+  const [fullName, setFullName] = useState('')
+  const [tenantName, setTenantName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+
+  function slugify(s: string): string {
+    return s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60)
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -18,11 +29,32 @@ export default function Login() {
       setError('Enter a valid work email — e.g. you@company.in')
       return
     }
+    if (mode === 'signup') {
+      if (!fullName.trim()) {
+        setError('Enter your full name')
+        return
+      }
+      if (!tenantName.trim()) {
+        setError('Enter your organisation name')
+        return
+      }
+    }
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
-      navigate(mode === 'signup' ? '/app/onboarding' : '/app')
+      if (mode === 'signup') {
+        await register({
+          email,
+          password,
+          full_name: fullName.trim(),
+          tenant_name: tenantName.trim(),
+          tenant_slug: slugify(tenantName),
+        })
+        navigate('/app/onboarding')
+      } else {
+        await login(email, password)
+        navigate('/app')
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Sign-in failed — is the API running?',
@@ -89,11 +121,38 @@ export default function Login() {
 
           <form onSubmit={submit} noValidate>
             {mode === 'signup' && (
-              <div className="mb-4">
-                <label htmlFor="org" className="mb-1.5 block text-sm font-medium">Organisation name</label>
-                <input id="org" type="text" placeholder="PayKraft Technologies"
-                  className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none" />
-              </div>
+              <>
+                <div className="mb-4">
+                  <label htmlFor="fullName" className="mb-1.5 block text-sm font-medium">
+                    Full name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    id="fullName"
+                    type="text"
+                    autoComplete="name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Arjun Mehta"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
+                    required
+                  />
+                </div>
+                <div className="mb-4">
+                  <label htmlFor="tenantName" className="mb-1.5 block text-sm font-medium">
+                    Organisation name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    id="tenantName"
+                    type="text"
+                    value={tenantName}
+                    onChange={(e) => setTenantName(e.target.value)}
+                    placeholder="PayKraft Technologies"
+                    className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm placeholder:text-ink-3 focus:border-accent focus:outline-none"
+                    required
+                  />
+                  <p className="mt-1 text-xs text-ink-3">Creates your tenant slug (e.g. paykraft-technologies)</p>
+                </div>
+              </>
             )}
             <div className="mb-4">
               <label htmlFor="email" className="mb-1.5 block text-sm font-medium">Work email <span className="text-danger">*</span></label>

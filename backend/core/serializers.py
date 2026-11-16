@@ -7,9 +7,10 @@ frontend types in the same PR.
 """
 
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from actions.models import Action, ProvenanceStep
-from core.models import AgentState, AttackStep, EvidenceItem, FeedLine, Incident, Membership
+from core.models import AgentState, AttackStep, EvidenceItem, FeedLine, Incident, Membership, Tenant
 
 
 class IncidentSerializer(serializers.ModelSerializer):
@@ -84,3 +85,69 @@ class MemberSerializer(serializers.ModelSerializer):
 
     def get_email(self, obj) -> str:
         return obj.user.email or obj.user.username
+
+
+class RegisterSerializer(serializers.Serializer):
+    """Founder signup: creates User + Tenant + Owner Membership in one call."""
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, min_length=8)
+    full_name = serializers.CharField(max_length=120)
+    tenant_name = serializers.CharField(max_length=120)
+    tenant_slug = serializers.SlugField(max_length=60)
+
+    def validate_tenant_slug(self, value):
+        if Tenant.objects.filter(slug=value).exists():
+            raise serializers.ValidationError("Tenant slug already taken.")
+        return value
+
+    def validate_email(self, value):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Email already registered.")
+        return value
+
+    def create(self, validated_data):
+        from django.contrib.auth import get_user_model
+        from django.db import transaction
+
+        User = get_user_model()
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=validated_data["email"],
+                email=validated_data["email"],
+                password=validated_data["password"],
+            )
+            tenant = Tenant.objects.create(
+                name=validated_data["tenant_name"],
+                slug=validated_data["tenant_slug"],
+            )
+            membership = Membership.objects.create(
+                user=user,
+                tenant=tenant,
+                role="Owner",
+                display_name=validated_data["full_name"],
+                last_label="",
+            )
+        return {"user": user, "tenant": tenant, "membership": membership}
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """Extends JWT login to include user profile + tenant in the response,
+    so the frontend knows which org they belong to without a follow-up call."""
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        user = self.user
+        membership = Membership.objects.filter(user=user).order_by("id").first()
+        if membership:
+            data["user"] = {
+                "id": user.id, "email": user.email, "name": membership.display_name,
+            }
+            data["tenant"] = {
+                "id": membership.tenant.id,
+                "name": membership.tenant.name,
+                "slug": membership.tenant.slug,
+            }
+        return data

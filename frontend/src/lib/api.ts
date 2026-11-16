@@ -18,6 +18,8 @@ const BASE: string =
 
 const ACCESS_KEY = 'viltrumx.access'
 const REFRESH_KEY = 'viltrumx.refresh'
+const TENANT_KEY = 'viltrumx.tenant'
+const USER_KEY = 'viltrumx.user'
 
 export class ApiError extends Error {
   public status: number
@@ -41,13 +43,27 @@ export const auth = {
   get isAuthenticated() {
     return Boolean(localStorage.getItem(ACCESS_KEY))
   },
+  get tenant() {
+    const raw = localStorage.getItem(TENANT_KEY)
+    return raw ? (JSON.parse(raw) as { id: number; name: string; slug: string }) : null
+  },
+  get user(): { id: number; email: string; name: string } | null {
+    const raw = localStorage.getItem(USER_KEY)
+    return raw ? (JSON.parse(raw) as { id: number; email: string; name: string }) : null
+  },
   save(access: string, refresh?: string) {
     localStorage.setItem(ACCESS_KEY, access)
     if (refresh) localStorage.setItem(REFRESH_KEY, refresh)
   },
+  saveProfile(user: { id: number; email: string; name: string }, tenant: { id: number; name: string; slug: string }) {
+    localStorage.setItem(USER_KEY, JSON.stringify(user))
+    localStorage.setItem(TENANT_KEY, JSON.stringify(tenant))
+  },
   clear() {
     localStorage.removeItem(ACCESS_KEY)
     localStorage.removeItem(REFRESH_KEY)
+    localStorage.removeItem(TENANT_KEY)
+    localStorage.removeItem(USER_KEY)
   },
 }
 
@@ -91,6 +107,12 @@ async function request<T>(
     if (await refreshAccessToken()) return request<T>(path, init, true)
     auth.clear()
   }
+  // Session is gone (401 with no usable refresh token): tell the app instead
+  // of letting every screen silently fall back to mock fixtures. AppLayout
+  // listens for this event and shows a "log in again" banner.
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('viltrumx:session-expired'))
+  }
 
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
@@ -129,13 +151,38 @@ export async function login(username: string, password: string) {
       res.status,
     )
   }
-  const body = (await res.json()) as { access: string; refresh: string }
+  const body = (await res.json()) as { access: string; refresh: string; user?: { id: number; email: string; name: string }; tenant?: { id: number; name: string; slug: string } }
   auth.save(body.access, body.refresh)
+  if (body.user && body.tenant) {
+    auth.saveProfile(body.user, body.tenant)
+  }
   return body
 }
 
 export function logout() {
   auth.clear()
+}
+
+export async function register(data: {
+  email: string
+  password: string
+  full_name: string
+  tenant_name: string
+  tenant_slug: string
+}) {
+  const res = await fetch(`${BASE}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new ApiError(body.detail || 'Registration failed.', res.status)
+  }
+  const body = (await res.json()) as { access: string; refresh: string; user: { id: number; email: string; name: string }; tenant: { id: number; name: string; slug: string } }
+  auth.save(body.access, body.refresh)
+  auth.saveProfile(body.user, body.tenant)
+  return body
 }
 
 /* ── typed endpoint map ──────────────────────────────────────────────── */
@@ -151,6 +198,7 @@ export const endpoints = {
   inventory: (category: string) => api.get(`/inventory?category=${category}`),
   connectors: () => api.get('/connectors'),
   connect: (id: string) => api.post(`/connectors/${id}/connect`),
+  githubOAuthStart: () => api.get('/connectors/gh/oauth/start'),
   replay: (scenario = 'inc-042') => api.post('/ingest/replay', { scenario }),
   actions: () => api.get('/actions'),
   actionTrace: (id: string) => api.get(`/actions/${id}/trace`),
@@ -167,6 +215,7 @@ export const endpoints = {
   frameworks: () => api.get('/compliance/frameworks'),
   exports: () => api.get('/compliance/exports'),
   exportFramework: (id: string) => api.post(`/compliance/${id}/export`),
+  downloadFramework: (id: string) => `${BASE}/compliance/${id}/download`,
   members: () => api.get('/members'),
   invoices: () => api.get('/billing/invoices'),
 }
