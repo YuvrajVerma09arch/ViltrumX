@@ -10,18 +10,62 @@ Event types (ARCHITECTURE §9):
 
 import json
 
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+
+from core.models import Membership
+
+# WebSocket close codes used for authorization failures.
+WS_CLOSE_UNAUTHENTICATED = 4401  # no/invalid session — anonymous connection
+WS_CLOSE_BAD_REQUEST = 4400  # missing or malformed tenant id
+WS_CLOSE_FORBIDDEN = 4403  # authenticated, but not a member of the tenant
 
 
 class TenantStreamConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.tenant_id = self.scope["url_route"]["kwargs"]["tenant_id"]
+        # AuthMiddlewareStack (see viltrumx/asgi.py) populates scope["user"].
+        # Never let an anonymous client subscribe to a tenant stream.
+        user = self.scope.get("user")
+        if user is None or not user.is_authenticated:
+            await self.close(code=WS_CLOSE_UNAUTHENTICATED)
+            return
+
+        # Parse the tenant id defensively even though the route uses <int:...>.
+        tenant_id = self._tenant_id_from_scope()
+        if tenant_id is None:
+            await self.close(code=WS_CLOSE_BAD_REQUEST)
+            return
+
+        # Sync ORM call — hand it to the sync-to-async executor so we don't
+        # block the event loop (and don't trip Django's async-DB guard).
+        if not await self._is_member(user, tenant_id):
+            await self.close(code=WS_CLOSE_FORBIDDEN)
+            return
+
+        self.tenant_id = tenant_id
         self.group = f"tenant_{self.tenant_id}_stream"
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
 
+    def _tenant_id_from_scope(self):
+        """Return a positive int tenant id from the URL kwargs, or None."""
+        raw = self.scope.get("url_route", {}).get("kwargs", {}).get("tenant_id")
+        try:
+            tenant_id = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return tenant_id if tenant_id > 0 else None
+
+    @database_sync_to_async
+    def _is_member(self, user, tenant_id):
+        """Membership is the single source of truth for tenant access."""
+        return Membership.objects.filter(user=user, tenant_id=tenant_id).exists()
+
     async def disconnect(self, code):
-        await self.channel_layer.group_discard(self.group, self.channel_name)
+        # A rejected connection may never have set self.group.
+        group = getattr(self, "group", None)
+        if group is not None:
+            await self.channel_layer.group_discard(group, self.channel_name)
 
     # ── group message handlers (type maps to method name with . → _) ─────────
 
