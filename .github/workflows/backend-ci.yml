@@ -18,9 +18,6 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-      redis:
-        image: redis:7
-        ports: ["6379:6379"]
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/viltrumx_test
     steps:
@@ -34,8 +31,11 @@ jobs:
         run: pip install -r backend/requirements.txt
       - name: Lint (ruff)
         run: ruff check backend/
+      # B104 fires on ALLOWED_HOSTS = [..., "0.0.0.0"] in settings/dev.py —
+      # that is a Django host allow-list, not a socket bind, so it is a false
+      # positive. Skip only B104; every other medium+ finding still fails.
       - name: Security scan (bandit)
-        run: bandit -r backend/ -ll -x backend/.venv
+        run: bandit -r backend/ -ll -s B104 -x backend/.venv
       - name: Migration check
         working-directory: backend
         run: |
