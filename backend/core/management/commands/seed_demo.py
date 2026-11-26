@@ -194,6 +194,9 @@ class Command(BaseCommand):
                     "rollback_plan": row["rollback"],
                     "policy_version": policy.version if policy else None,
                     "executed_at": now if row["status"] == "executed" else None,
+                    # Seeded demo actions never touched a real system — label
+                    # them simulated so rollback/the UI stay honest.
+                    "execution_mode": "simulated" if row["status"] == "executed" else "",
                 },
             )
             # ordering: fixtures are newest-first; stagger created_at to match

@@ -9,6 +9,14 @@ VALID_LANGS = {"en", "hi", "gu"}
 
 
 def get_narrative(tenant, incident_id: str, lang: str):
+    """Resolve a narrative for (tenant, incident, lang), or None if none exists.
+
+    Never returns a different language's text as a stand-in: an English
+    PayKraft fixture served for an arbitrary tenant's incident would show the
+    wrong company's data. The demo fixture is only for the demo tenant's
+    INC-042; everything else either has a stored narrative or gets None (the
+    view turns that into a 404 "not available in this language yet").
+    """
     if lang not in VALID_LANGS:
         return None
 
@@ -26,16 +34,18 @@ def get_narrative(tenant, incident_id: str, lang: str):
             "decision": stored.decision,
         }
 
-    # 2. For INC-042 fall back to the rich fixture (EN/HI/GU already there)
-    if incident_id == "INC-042" and lang in FIXTURE:
+    # 2. The rich multilingual fixture describes the PAYKRAFT demo tenant's
+    #    INC-042 only — never borrow it for another org or incident.
+    is_demo_incident = tenant.slug == "paykraft" and incident_id == "INC-042"
+    if is_demo_incident and lang in FIXTURE:
         return FIXTURE[lang]
 
     # 3. Generate on-demand for other incidents (EN only; HI/GU via IndicTrans2)
     if lang == "en":
         return _generate_and_store(tenant, incident_id, lang)
 
-    # 4. For HI/GU with no stored narrative, return EN fixture translated stub
-    return FIXTURE.get("en")
+    # 4. HI/GU with no stored narrative: nothing honest to show → None.
+    return None
 
 
 def _generate_and_store(tenant, incident_id: str, lang: str):

@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 
+from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -57,7 +58,7 @@ class _OrchAPIView(APIView):
 # ── Detection ────────────────────────────────────────────────────────────────
 class RawEventDetailView(_OrchAPIView):
     def get(self, request, event_id: int):
-        ev = RawEvent.objects.filter(pk=event_id).first()
+        ev = RawEvent.objects.filter(pk=event_id, tenant=self.tenant).first()
         if ev is None:
             return Response({"detail": "Not found."}, status=404)
         return Response({
@@ -75,7 +76,7 @@ class DetectionScoreView(_OrchAPIView):
         if not eid:
             return Response({"detail": "event_id required"}, status=400)
         from detection.scorer import score_event
-        ev = RawEvent.objects.filter(pk=eid).first()
+        ev = RawEvent.objects.filter(pk=eid, tenant=self.tenant).first()
         if ev is None:
             return Response({"detail": "Not found."}, status=404)
         return Response(score_event(ev))
@@ -89,9 +90,10 @@ class NoiseGateView(_OrchAPIView):
         if not eid:
             # Fall back to the fingerprint the orchestrator already carries
             return Response({"cluster_id": None, "suppressed": False})
-        ev = RawEvent.objects.filter(pk=eid).first()
+        ev = RawEvent.objects.filter(pk=eid, tenant=self.tenant).first()
         if ev is None:
             ev = RawEvent.objects.filter(
+                tenant=self.tenant,
                 principal=request.data.get("principal", ""),
                 event_type=request.data.get("eventType", "") or "",
                 target=request.data.get("target", "") or "",
@@ -158,6 +160,7 @@ class PeerScoreView(_OrchAPIView):
         from detection.peer_cohort import compute_peer_context
 
         qs = RawEvent.objects.filter(
+            tenant=self.tenant,
             occurred_at__gte=timezone.now() - timedelta(days=7),
         ).order_by("occurred_at")
         ctx = compute_peer_context(qs)
@@ -189,6 +192,9 @@ class BlastRadiusView(_OrchAPIView):
 class CriticalityView(_OrchAPIView):
     """Onboarding: founder tags entities as crown-jewel / high / etc."""
     def put(self, request):
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, "Admin")
         target = request.data.get("target")
         criticality = request.data.get("criticality")
         if not target or criticality not in ("low", "medium", "high", "crown-jewel"):
@@ -221,6 +227,9 @@ class IncidentCreateView(_OrchAPIView):
     Idempotent on (tenant, external_id)."""
 
     def post(self, request):
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, "Analyst")
         incident_id = request.data.get("incidentId")
         if not incident_id:
             return Response({"detail": "incidentId required"}, status=400)
@@ -232,6 +241,10 @@ class IncidentCreateView(_OrchAPIView):
                 "entity": request.data.get("entity", ""),
                 "severity": request.data.get("severity", "high"),
                 "mitre": request.data.get("mitre", []),
+                # occurred_at + time_label are NOT NULL; the orchestrator's
+                # payload doesn't carry them, so default to "found it now".
+                "occurred_at": timezone.now(),
+                "time_label": "just now",
             },
         )
         # Replace the attack chain rows atomically
@@ -262,11 +275,14 @@ class RecallView(_OrchAPIView):
             return Response({"matches": []})
         k = int(request.query_params.get("k", 5))
         from reports.recall import recall
-        return Response({"matches": recall(text, k=k)})
+        return Response({"matches": recall(text, k=k, tenant_id=self.tenant.id)})
 
 
 class RememberView(_OrchAPIView):
     def post(self, request):
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, "Analyst")
         from reports.recall import remember
         ok = remember(
             request.data.get("incidentId", ""), request.data.get("text", ""),
@@ -278,6 +294,9 @@ class RememberView(_OrchAPIView):
 # ── Risk forecast (Threat-Prediction scheduled job) ────────────────────────
 class RiskForecastView(_OrchAPIView):
     def post(self, request):
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, "Analyst")
         from datetime import timedelta
 
         from django.utils import timezone
@@ -288,6 +307,7 @@ class RiskForecastView(_OrchAPIView):
         window_days = int(request.data.get("window_days", 7))
         from detection.peer_cohort import compute_peer_context, flag_outliers
         qs = RawEvent.objects.filter(
+            tenant=self.tenant,
             occurred_at__gte=timezone.now() - timedelta(days=window_days)
         ).order_by("occurred_at")
         ctx = compute_peer_context(qs)
@@ -315,6 +335,13 @@ class RiskForecastView(_OrchAPIView):
 class FeedEntryView(_OrchAPIView):
     """Orchestrator posts a feed line for the Command Deck."""
     def post(self, request, tenant_id: int):
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, "Analyst")
+        # Always write to the caller's own tenant; a mismatched URL tenant_id is
+        # a bug, not a way to write into someone else's feed.
+        if int(tenant_id) != self.tenant.id:
+            return Response({"detail": "tenant mismatch"}, status=403)
         from django.utils import timezone
         try:
             from asgiref.sync import async_to_sync
@@ -451,6 +478,12 @@ class ActionCreateView(_OrchAPIView):
     """
 
     def post(self, request):
+        from core.tenancy import require_role
+
+        # Proposing an action is Analyst work (the orchestrator is an Analyst).
+        # A Viewer must never be able to propose — and thereby auto-execute any
+        # L2/L3 containment the policy dial allows.
+        require_role(request, self.tenant, "Analyst")
         action_type = request.data.get("actionType")
         target = request.data.get("target")
         if not action_type or not target:
@@ -593,7 +626,7 @@ def _classify(event: RawEvent) -> str | None:
         from datetime import timedelta
 
         recently = RawEvent.objects.filter(
-            principal=event.principal, event_type="GetObject",
+            tenant=event.tenant, principal=event.principal, event_type="GetObject",
             target=event.target, occurred_at__gte=event.occurred_at - timedelta(seconds=60),
             occurred_at__lte=event.occurred_at,
         ).count()

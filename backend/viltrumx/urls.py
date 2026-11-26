@@ -2,7 +2,15 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from connectors.views import GitHubOAuthCallbackView, GitHubOAuthStartView, GitHubWebhookView
+from billing import views as billing_views
+from connectors.views import (
+    ConnectorCredentialsView,
+    ConnectorDisconnectView,
+    GitHubOAuthCallbackView,
+    GitHubOAuthStartView,
+    GitHubWebhookView,
+)
+from core import verification
 from core import views as v
 from core import views_agent as va
 
@@ -43,6 +51,16 @@ api_v1 = [
         "connectors/<str:connector_id>/connect",
         v.ConnectorConnectView.as_view(),
         name="connector-connect",
+    ),
+    path(
+        "connectors/<str:connector_id>/credentials",
+        ConnectorCredentialsView.as_view(),
+        name="connector-credentials",
+    ),
+    path(
+        "connectors/<str:connector_id>/disconnect",
+        ConnectorDisconnectView.as_view(),
+        name="connector-disconnect",
     ),
     # GitHub OAuth connect flow
     path("connectors/gh/oauth/start", GitHubOAuthStartView.as_view(), name="github-oauth-start"),
@@ -94,13 +112,32 @@ api_v1 = [
     ),
     # settings
     path("members", v.MemberListView.as_view(), name="members"),
-    path("billing/invoices", v.InvoiceListView.as_view(), name="invoices"),
+    path("members/invite", v.MemberInviteView.as_view(), name="member-invite"),
+    path("tenant/entitlements", v.TenantEntitlementsView.as_view(), name="tenant-entitlements"),
+    # startup verification (P4)
+    path("verify/status", verification.VerificationStatusView.as_view(), name="verify-status"),
+    path("verify/domain/start", verification.DomainStartView.as_view(), name="verify-domain-start"),
+    path("verify/domain/check", verification.DomainCheckView.as_view(), name="verify-domain-check"),
+    path("verify/gstin", verification.GstinVerifyView.as_view(), name="verify-gstin"),
     # command-deck feed writer (orchestrator)
     path("tenants/<int:tenant_id>/feed", va.FeedEntryView.as_view(), name="tenant-feed"),
 ]
 
+# Billing (Razorpay): plans, orders, verify, real GST invoices. The old demo
+# InvoiceListView stub is gone — billing/invoices now serves real invoices.
+api_v1 += [
+    path("", include("billing.urls")),
+]
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    # Public liveness probe — root level, no auth (deploy/LB health checks).
+    path("healthz", v.HealthView.as_view(), name="healthz"),
     path("api/v1/", include(api_v1)),
     path("webhooks/github", GitHubWebhookView.as_view(), name="github-webhook"),
+    path(
+        "webhooks/razorpay",
+        billing_views.RazorpayWebhookView.as_view(),
+        name="razorpay-webhook",
+    ),
 ]

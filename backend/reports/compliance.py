@@ -10,20 +10,26 @@ import os
 from io import BytesIO
 
 from django.utils import timezone
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+    REPORTLAB_AVAILABLE = True
+except ImportError:  # reportlab is in requirements.txt; guard as defence-in-depth
+    REPORTLAB_AVAILABLE = False
 
 from core import demo_data
 
 # Register Unicode font for Hindi/Devanagari support
 FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 HINDI_FONT_PATH = os.path.join(FONT_DIR, "NotoSansDevanagari-Regular.ttf")
-if os.path.exists(HINDI_FONT_PATH):
+if REPORTLAB_AVAILABLE and os.path.exists(HINDI_FONT_PATH):
     pdfmetrics.registerFont(TTFont("NotoSansDevanagari", HINDI_FONT_PATH))
     HINDI_FONT = "NotoSansDevanagari"
 else:
@@ -35,6 +41,9 @@ KNOWN_FRAMEWORKS = {f["id"]: f for f in demo_data.FRAMEWORKS}
 def generate_export(tenant, framework_id: str, actor: str):
     if framework_id not in KNOWN_FRAMEWORKS:
         return None
+    if not REPORTLAB_AVAILABLE:
+        # The view maps a dict with "error" to a 503 rather than crashing.
+        return {"error": "PDF generation unavailable"}
 
     from reports.models import ComplianceExport
 

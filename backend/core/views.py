@@ -12,7 +12,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
 from django.core import mail as django_mail
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -23,7 +23,14 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from actions import executor
 from actions.models import Action, AutonomyPolicy
 from core import demo_data
-from core.models import AgentState, FeedLine, Incident, Membership, VerificationCode
+from core.models import (
+    AgentState,
+    FeedLine,
+    Incident,
+    Membership,
+    Tenant,
+    VerificationCode,
+)
 from core.serializers import (
     ActionSerializer,
     AgentStateSerializer,
@@ -305,14 +312,56 @@ class ResendView(APIView):
         return Response(_challenge_payload(code, email, purpose), status=status.HTTP_202_ACCEPTED)
 
 
+class HealthView(APIView):
+    """Public liveness/readiness probe — no auth, no tenant.
+
+    The database is critical: an unreachable DB is a 503. Redis only backs the
+    realtime/queue path, so a failed ping is reported ("error") but does not by
+    itself make the endpoint unhealthy.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        db_status = "ok"
+        try:
+            connection.ensure_connection()
+        except Exception:  # noqa: BLE001
+            db_status = "error"
+
+        redis_status = "ok"
+        try:
+            import redis
+
+            redis.from_url(settings.REDIS_URL).ping()
+        except Exception:  # noqa: BLE001
+            redis_status = "error"
+
+        healthy = db_status == "ok"
+        return Response(
+            {"status": "ok" if healthy else "error", "db": db_status, "redis": redis_status},
+            status=status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
 class TenantAPIView(APIView):
-    """Base: resolves the caller's tenant once per request."""
+    """Base: resolves the caller's tenant once per request.
+
+    Write endpoints should call ``self.require_role(request, "Admin")`` (or
+    "Analyst"/"Owner") before mutating state — see core.tenancy.require_role.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
         self.tenant = tenant_for(request)
+
+    def require_role(self, request, min_role: str) -> None:
+        from core.tenancy import require_role
+
+        require_role(request, self.tenant, min_role)
 
 
 # ── Command Deck ─────────────────────────────────────────────────────────────
@@ -354,16 +403,23 @@ class IncidentDetailView(TenantAPIView):
 
 class IncidentNarrativeView(TenantAPIView):
     def get(self, request, incident_id: str):
-        from reports.narratives import get_narrative
+        from reports.narratives import VALID_LANGS, get_narrative
 
         # A narrative belongs to a real incident in this tenant's ledger. Never
         # fall through to the shared demo fixture for an unknown incident id.
         if not Incident.objects.filter(tenant=self.tenant, external_id=incident_id).exists():
             return Response({"detail": "Not found."}, status=404)
         lang = request.query_params.get("lang", "en")
+        if lang not in VALID_LANGS:
+            return Response({"detail": "lang must be one of ['en', 'gu', 'hi']"}, status=400)
         narrative = get_narrative(self.tenant, incident_id, lang)
         if narrative is None:
-            return Response({"detail": "lang must be one of ['en', 'gu', 'hi']"}, status=400)
+            # No stored narrative in this language and no fixture for this
+            # tenant — say so plainly instead of serving English.
+            return Response(
+                {"detail": "Narrative not available in this language yet."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         return Response(narrative)
 
 
@@ -402,6 +458,10 @@ class ConnectorListView(TenantAPIView):
         rows = []
         db_states = {c.connector_id: c for c in Connector.objects.filter(tenant=self.tenant)}
         for fixture in demo_data.CONNECTORS:
+            # Per-tenant connector entitlement: a tenant entitled to only some
+            # sources (e.g. GitHub + AWS) never sees the others in the wizard.
+            if not self.tenant.connector_enabled(fixture["id"]):
+                continue
             state = db_states.get(fixture["id"])
             if state:
                 status = state.status
@@ -414,8 +474,20 @@ class ConnectorListView(TenantAPIView):
 
 class ConnectorConnectView(TenantAPIView):
     def post(self, request, connector_id: str):
+        self.require_role(request, "Admin")
         from connectors.models import Connector
         from ontology import graph as og
+
+        # Startup verification gate (P4): a real, unverified tenant cannot
+        # connect a live data source yet — this is what makes "are you a real
+        # startup?" enforceable instead of an honor system. The demo tenant and
+        # tenants who've verified their domain are exempt.
+        if not _is_demo_tenant(self.tenant) and not self.tenant.domain_verified:
+            return Response(
+                {"detail": "Verify your company domain before connecting live sources.",
+                 "verify": "/api/v1/verify/domain/start"},
+                status=403,
+            )
 
         known = {c["id"]: c for c in demo_data.CONNECTORS}
         if connector_id not in known:
@@ -447,6 +519,7 @@ class ConnectorConnectView(TenantAPIView):
 
 class IngestReplayView(TenantAPIView):
     def post(self, request):
+        self.require_role(request, "Analyst")
         from connectors.tasks import replay_synthetic_logs
 
         scenario = request.data.get("scenario", "inc-042")
@@ -563,6 +636,7 @@ class PurpleScenariosView(TenantAPIView):
 
 class PurpleRunView(TenantAPIView):
     def post(self, request, scenario_id: str):
+        self.require_role(request, "Analyst")
         from reports.purple import run_scenario
 
         row = run_scenario(self.tenant, scenario_id)
@@ -594,11 +668,14 @@ class RecentExportsView(TenantAPIView):
 
 class ComplianceExportView(TenantAPIView):
     def post(self, request, framework_id: str):
+        self.require_role(request, "Analyst")
         from reports.compliance import generate_export
 
         row = generate_export(self.tenant, framework_id, actor=request.user.username)
         if row is None:
             return Response({"detail": "Unknown framework."}, status=404)
+        if isinstance(row, dict) and "error" in row:
+            return Response(row, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response(row, status=201)
 
 
@@ -626,6 +703,113 @@ class MemberListView(TenantAPIView):
         return Response(MemberSerializer(members, many=True).data)
 
 
+class MemberInviteView(TenantAPIView):
+    """Add a teammate to the tenant (Owner/Admin only).
+
+    A never-before-seen email gets an inactive account + an emailed invite;
+    an existing user is attached immediately. The caller cannot grant a role
+    higher than their own — an Admin cannot mint an Owner.
+    """
+
+    def post(self, request):
+        from core.serializers import InviteSerializer
+        from core.tenancy import role_for
+
+        self.require_role(request, "Admin")
+        serializer = InviteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        caller_role = role_for(request, self.tenant)
+        from core.tenancy import ROLE_RANK
+
+        if ROLE_RANK[data["role"]] > ROLE_RANK.get(caller_role, -1):
+            return Response(
+                {"detail": "You cannot grant a role higher than your own."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        User = get_user_model()
+        email = data["email"]
+        user = User.objects.filter(email__iexact=email).first()
+        created = False
+        if user is None:
+            user = User.objects.create_user(
+                username=email, email=email, password=None, is_active=False
+            )
+            created = True
+
+        membership, made = Membership.objects.get_or_create(
+            user=user,
+            tenant=self.tenant,
+            defaults={
+                "role": data["role"],
+                "display_name": data.get("display_name") or email.split("@")[0],
+                "last_label": "invited",
+            },
+        )
+        if not made:
+            return Response(
+                {"detail": "That person is already a member of this workspace."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # Deliver an invite (best-effort — never fail the invite if mail is down).
+        try:
+            django_mail.send_mail(
+                subject=f"You've been invited to {self.tenant.name} on ViltrumX",
+                message=(
+                    f"{request.user.username} invited you to the {self.tenant.name} "
+                    f"workspace as {data['role']}. Sign in at "
+                    f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')}/login "
+                    "with this email address to get started."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=True,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        return Response(
+            {
+                "email": email,
+                "role": membership.role,
+                "account_created": created,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class TenantEntitlementsView(TenantAPIView):
+    """What this tenant's plan includes — modules + connectors.
+
+    Drives the flexible per-client surface: two customers on the same platform
+    can have different module sets and connector entitlements. The frontend
+    reads this once at load and hides modules the tenant isn't entitled to.
+    """
+
+    def get(self, request):
+        from connectors.models import Connector
+
+        tenant = self.tenant
+        modules = tenant.enabled_modules or list(Tenant.DEFAULT_MODULES)
+        # A connector is "entitled" if the tenant has no explicit restriction
+        # or it's listed; the UI shows only entitled + actually-available ones.
+        connected = set(
+            Connector.objects.filter(tenant=tenant, status="connected")
+            .values_list("connector_id", flat=True)
+        )
+        return Response(
+            {
+                "tenant": {"id": tenant.id, "name": tenant.name, "slug": tenant.slug},
+                "modules": modules,
+                "connectors_enabled": tenant.enabled_connectors or "all",
+                "connectors_connected": sorted(connected),
+            }
+        )
+
+
 class InvoiceListView(TenantAPIView):
     # stub-tier for viva (BUILD-PLAN: billing stays fixture-backed)
     def get(self, request):
@@ -651,6 +835,7 @@ class ActionTraceView(TenantAPIView):
 
 class ActionRollbackView(TenantAPIView):
     def post(self, request, action_id: str):
+        self.require_role(request, "Analyst")
         action = Action.objects.filter(tenant=self.tenant, external_id=action_id).first()
         if action is None or executor.rollback_action(action, request.user.username) is None:
             return Response({"detail": "Not found or not rollbackable."}, status=409)
@@ -659,6 +844,7 @@ class ActionRollbackView(TenantAPIView):
 
 class ActionDecisionView(TenantAPIView):
     def post(self, request, action_id: str):
+        self.require_role(request, "Analyst")
         decision = request.data.get("decision")
         if decision not in ("approve", "reject"):
             return Response({"detail": "decision must be 'approve' or 'reject'"}, status=400)
@@ -679,6 +865,7 @@ class PolicyView(TenantAPIView):
         return Response(policy.as_rows() if policy else [])
 
     def put(self, request):
+        self.require_role(request, "Admin")
         try:
             policy = executor.save_policy(self.tenant, request.data, request.user.username)
         except ValueError as exc:
