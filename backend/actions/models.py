@@ -65,6 +65,7 @@ class Action(models.Model):
         ("rolled-back", "Rolled back"),
         ("failed", "Failed"),
         ("vetoed", "Vetoed"),
+        ("manual", "Manual action required"),  # no actuator/credentials — human must act
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="actions")
@@ -80,6 +81,18 @@ class Action(models.Model):
     time_label = models.CharField(max_length=60)
     rollback_plan = models.CharField(max_length=300)
     policy_version = models.PositiveIntegerField(null=True, blank=True)
+    # ── Real actuation (P3) ──────────────────────────────────────────────────
+    # How the action was actually applied:
+    #   real      — a provider API call changed external state (receipt holds
+    #               exactly what to undo)
+    #   simulated — the demo tenant has no live credentials; nothing external
+    #               happened (clearly labelled, never passed off as real)
+    #   manual    — no safe programmatic actuator (or no creds); a human must
+    #               apply it. Honest, not theater.
+    execution_mode = models.CharField(max_length=12, blank=True, default="")
+    # The inverse-operation data: provider ids / prior state needed to revert.
+    execution_receipt = models.JSONField(default=dict, blank=True)
+    last_error = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     executed_at = models.DateTimeField(null=True, blank=True)
     auto_rollback_at = models.DateTimeField(null=True, blank=True)  # L3 timer
