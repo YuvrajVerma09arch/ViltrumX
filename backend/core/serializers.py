@@ -70,10 +70,14 @@ class ActionSerializer(serializers.ModelSerializer):
     blastRadius = serializers.FloatField(source="blast_radius")
     time = serializers.CharField(source="time_label")
     rollback = serializers.CharField(source="rollback_plan")
+    executionMode = serializers.CharField(source="execution_mode")
 
     class Meta:
         model = Action
-        fields = ["id", "type", "target", "level", "status", "blastRadius", "time", "rollback"]
+        fields = [
+            "id", "type", "target", "level", "status", "blastRadius", "time",
+            "rollback", "executionMode",
+        ]
 
 
 class ProvenanceStepSerializer(serializers.ModelSerializer):
@@ -95,6 +99,22 @@ class MemberSerializer(serializers.ModelSerializer):
         return obj.user.email or obj.user.username
 
 
+class InviteSerializer(serializers.Serializer):
+    """Add a teammate to the caller's tenant at a given role.
+
+    If the email already has a ViltrumX account it's attached immediately;
+    otherwise a pending account is created and a set-password screen is
+    emailed. Never lets the caller grant a role above their own.
+    """
+
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=["Admin", "Analyst", "Viewer"])
+    display_name = serializers.CharField(max_length=120, required=False, allow_blank=True)
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
 class RegisterSerializer(serializers.Serializer):
     """Founder signup: creates an inactive User + Tenant + Owner Membership.
 
@@ -113,11 +133,22 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_email(self, value):
+        from django.conf import settings
         from django.contrib.auth import get_user_model
+
+        from core.verification import is_free_email
+
         User = get_user_model()
         email = value.strip().lower()
         if User.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("Email already registered.")
+        # A company workspace signup must use a company domain, not gmail.
+        # (Set ALLOW_FREE_EMAIL_SIGNUP=1 to bypass for local testing.)
+        if getattr(settings, "REQUIRE_BUSINESS_EMAIL", True) and is_free_email(email):
+            raise serializers.ValidationError(
+                "Please sign up with your company email — a free email provider "
+                "(gmail, yahoo, …) can't own a company workspace."
+            )
         return email
 
     def create(self, validated_data):
@@ -144,7 +175,29 @@ class RegisterSerializer(serializers.Serializer):
                 display_name=validated_data["full_name"],
                 last_label="",
             )
+            # Seed a conservative, working autonomy dial so the Autonomy Console
+            # is not blank and resolve_level() has real rows to resolve against
+            # from day one (otherwise every action fails safe to L4 on an empty
+            # policy). This is the same default the demo seed uses.
+            _seed_default_policy(tenant, actor=validated_data["email"])
         return {"user": user, "tenant": tenant, "membership": membership}
+
+
+def _seed_default_policy(tenant, actor: str = "system:signup"):
+    """Create version 1 of the tenant's autonomy dial from the safe defaults."""
+    from actions.models import AutonomyPolicy, PolicyRule
+    from core.demo_data import DEFAULT_POLICIES
+
+    policy = AutonomyPolicy.objects.create(tenant=tenant, version=1, created_by=actor)
+    for i, row in enumerate(DEFAULT_POLICIES):
+        PolicyRule.objects.create(
+            policy=policy,
+            action_type=row["actionType"],
+            level=row["level"],
+            crown_jewel_override=row.get("crownJewelOverride", row["level"]),
+            order=i,
+        )
+    return policy
 
 
 class VerifySerializer(serializers.Serializer):

@@ -34,10 +34,63 @@ class Tenant(models.Model):
     llm_provider = models.CharField(
         max_length=20, default="groq", choices=[("groq", "Groq"), ("ollama", "Ollama")]
     )
+    # ── Per-tenant service surface (flexibility) ──────────────────────────────
+    # Which product modules this tenant's plan/contract includes. The UI and
+    # API read these to show only the surfaces a client actually bought — two
+    # customers can sit on the same platform with different modules. An empty
+    # list means "all default modules" (so existing tenants are unaffected).
+    enabled_modules = models.JSONField(default=list, blank=True)
+    # Connector ids this tenant is entitled to configure (e.g. ["gh","gw","aws"]).
+    enabled_connectors = models.JSONField(default=list, blank=True)
+    # ── Startup verification (P4) ─────────────────────────────────────────────
+    # A real customer proves control of their company domain (DNS TXT) and,
+    # optionally, their GSTIN. Until domain-verified the tenant is an
+    # unactivated trial (no live data ingest). No plaintext secret stored.
+    domain = models.CharField(max_length=253, blank=True, default="")  # "acme.in"
+    domain_token = models.CharField(max_length=80, blank=True, default="")  # TXT value
+    domain_verified_at = models.DateTimeField(null=True, blank=True)
+    gstin = models.CharField(max_length=15, blank=True, default="")
+    gstin_legal_name = models.CharField(max_length=200, blank=True, default="")
+    gstin_verified_at = models.DateTimeField(null=True, blank=True)
+    verification_status = models.CharField(
+        max_length=20, default="pending_domain",
+        choices=[
+            ("pending_domain", "Pending domain"),
+            ("domain_verified", "Domain verified"),
+            ("fully_verified", "Fully verified"),
+            ("rejected", "Rejected"),
+        ],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # Default module surface for every new tenant unless overridden.
+    DEFAULT_MODULES = [
+        "command_deck", "ontology", "investigation", "autonomy", "provenance",
+        "risk", "inventory", "purple", "compliance",
+    ]
 
     def __str__(self):
         return self.slug
+
+    def has_module(self, module: str) -> bool:
+        """True when this tenant is entitled to ``module``.
+
+        An empty ``enabled_modules`` means "all defaults", so a tenant that
+        never customised gets the full product.
+        """
+        if not self.enabled_modules:
+            return module in self.DEFAULT_MODULES
+        return module in self.enabled_modules
+
+    def connector_enabled(self, connector_id: str) -> bool:
+        """True when this tenant may configure ``connector_id``."""
+        if not self.enabled_connectors:
+            return True  # no explicit restriction → all available
+        return connector_id in self.enabled_connectors
+
+    @property
+    def domain_verified(self) -> bool:
+        return self.domain_verified_at is not None
 
 
 class Membership(models.Model):
