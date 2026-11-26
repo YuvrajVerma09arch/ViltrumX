@@ -2,6 +2,7 @@
 
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from core.models import Membership, Tenant
@@ -9,12 +10,31 @@ from core.models import Membership, Tenant
 
 @pytest.fixture
 def empty_client(db):
-    tenant = Tenant.objects.create(name="Customer", slug="empty-customer")
+    # A realistic activated tenant: company domain verified (P4 gate) but with
+    # no data yet — exactly the day-one customer state.
+    tenant = Tenant.objects.create(
+        name="Customer", slug="empty-customer",
+        domain="customer.example", domain_verified_at=timezone.now(),
+        verification_status="domain_verified",
+    )
     user = User.objects.create_user("owner@example.com", password="test-password")
     Membership.objects.create(user=user, tenant=tenant, role="Owner", display_name="Owner")
     client = APIClient()
     client.force_authenticate(user)
     return client
+
+
+@pytest.mark.django_db
+def test_unverified_tenant_cannot_connect_live_source():
+    """P4 gate: an unverified (non-demo) tenant is blocked from live ingest."""
+    tenant = Tenant.objects.create(name="Unverified", slug="unverified-co")
+    user = User.objects.create_user("u@unverified.example", password="x")
+    Membership.objects.create(user=user, tenant=tenant, role="Owner", display_name="U")
+    client = APIClient()
+    client.force_authenticate(user)
+    resp = client.post("/api/v1/connectors/gh/connect")
+    assert resp.status_code == 403
+    assert "verify" in resp.json()["detail"].lower()
 
 
 @pytest.mark.parametrize("path", [
