@@ -150,7 +150,7 @@ export type Action = {
   type: string
   target: string
   level: AutonomyLevel
-  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled'
+  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled' | 'manual' | 'failed'
   blastRadius: number
   time: string
   rollback: string

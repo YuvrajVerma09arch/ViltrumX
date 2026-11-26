@@ -172,6 +172,8 @@ export function StatusPill({ status }: { status: string }) {
     'rolled-back': { tone: 'blue' },
     proposed: { tone: 'amber' },
     'awaiting approval': { tone: 'amber' },
+    manual: { tone: 'amber', icon: AlertTriangle },  // needs a human to apply it
+    failed: { tone: 'red', icon: AlertTriangle },     // provider call errored
     scheduled: { tone: 'blue' },
     passed: { tone: 'green', icon: ShieldCheck },
     warning: { tone: 'amber', icon: AlertTriangle },

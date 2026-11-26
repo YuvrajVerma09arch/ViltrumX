@@ -266,7 +266,32 @@ export const endpoints = {
   exportFramework: (id: string) => api.post(`/compliance/${id}/export`),
   downloadFramework: (id: string) => `${BASE}/compliance/${id}/download`,
   members: () => api.get('/members'),
+  inviteMember: (body: { email: string; role: string; display_name?: string }) =>
+    api.post('/members/invite', body),
+  entitlements: () =>
+    api.get<{
+      modules: string[]
+      connectors_enabled: string | string[]
+      connectors_connected: string[]
+    }>('/tenant/entitlements'),
   invoices: () => api.get('/billing/invoices'),
+  billingPlans: () =>
+    api.get<{ configured: boolean; plans: { id: string; name: string; amount_inr: number }[] }>(
+      '/billing/plans',
+    ),
+  createOrder: (plan: string) => api.post('/billing/orders', { plan }),
+  verifyPayment: (body: {
+    razorpay_order_id: string
+    razorpay_payment_id: string
+    razorpay_signature: string
+  }) => api.post('/billing/verify', body),
+  verifyStatus: () =>
+    api.get<{ domain: string; domain_verified: boolean; verification_status: string }>(
+      '/verify/status',
+    ),
+  verifyDomainStart: (domain: string) => api.post('/verify/domain/start', { domain }),
+  verifyDomainCheck: () => api.post('/verify/domain/check', {}),
+  verifyGstin: (gstin: string) => api.post('/verify/gstin', { gstin }),
 }
 
 /* ── WebSocket (Command Deck live feed) ──────────────────────────────── */
@@ -276,9 +301,23 @@ export const endpoints = {
  * Needs an ASGI server — `daphne viltrumx.asgi:application`. Under plain
  * `manage.py runserver` the upgrade 404s and the feed falls back to polling
  * the REST endpoint, which is why the Command Deck still renders either way.
+ *
+ * Returns null when the tenant id isn't known yet — the caller then polls
+ * instead of guessing tenant 1. The URL is always absolute (browsers reject
+ * relative WebSocket URLs): the origin comes from VITE_API_URL when it is an
+ * absolute URL, otherwise from the page's own location.
  */
-export function streamUrl(tenantId = 1): string {
-  const httpBase = BASE.replace(/\/api\/v1\/?$/, '')
-  const wsBase = httpBase.replace(/^http/, 'ws')
-  return `${wsBase}/ws/tenant/${tenantId}/stream`
+export function streamUrl(): string | null {
+  const tenantId = auth.tenant?.id
+  if (!tenantId) return null
+
+  let origin: string
+  try {
+    // BASE is VITE_API_URL when set, else the local dev API host.
+    origin = /^https?:\/\//i.test(BASE) ? new URL(BASE).origin : window.location.origin
+  } catch {
+    origin = window.location.origin
+  }
+  const wsOrigin = origin.replace(/^http/i, 'ws')
+  return `${wsOrigin}/ws/tenant/${tenantId}/stream`
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UserPlus, Check } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
 import { PageHeader, Card, Table, Td, Badge, Button, Segmented, Toggle } from '../components/ui'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
@@ -9,6 +9,7 @@ import { cn } from '../lib/utils'
 // page has no dependency on the demo fixtures in `data/mock.ts`.
 type Member = { name: string; email: string; role: string; last: string }
 type Invoice = { id: string; period: string; amount: string; gst: string; status: string }
+type PlanInfo = { id: string; name: string; amount_inr: number }
 
 type Tab = 'team' | 'tenant' | 'billing'
 
@@ -16,19 +17,75 @@ const ROLE_TONE: Record<string, 'green' | 'blue' | 'purple' | 'neutral'> = {
   Owner: 'green', Admin: 'blue', Analyst: 'purple', Viewer: 'neutral',
 }
 
-const PLANS = [
-  { name: 'Seed', price: '₹9,999', per: '/mo + GST', pitch: 'Up to 25 identities · 2 connectors · L1–L2 autonomy', current: false },
-  { name: 'Growth', price: '₹29,499', per: '/mo + GST', pitch: 'Up to 150 identities · all connectors · full L1–L4 ladder · purple team nightly', current: true },
-  { name: 'Scale', price: '₹74,999', per: '/mo + GST', pitch: '300+ identities · self-hosted inference · RBI pack · dedicated support', current: false },
-]
+// Indicative plan copy — actual amounts come from /billing/plans (server truth).
+const PLAN_PITCH: Record<string, string> = {
+  seed: 'Up to 25 identities · 2 connectors · L1–L2 autonomy',
+  growth: 'Up to 150 identities · all connectors · full L1–L4 ladder · purple team nightly',
+  scale: '300+ identities · self-hosted inference · RBI pack · dedicated support',
+}
+
+/** Load Razorpay Checkout.js once and run a payment for a plan. */
+async function startCheckout(plan: PlanInfo) {
+  const order = (await endpoints.createOrder(plan.id)) as {
+    order_id: string; amount: number; currency: string; key_id: string
+  }
+  await new Promise<void>((resolve, reject) => {
+    const w = window as unknown as { Razorpay?: new (o: unknown) => { open: () => void } }
+    const launch = () => {
+      if (!w.Razorpay) return reject(new Error('Razorpay Checkout failed to load'))
+      const rzp = new w.Razorpay({
+        key: order.key_id,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'ViltrumX',
+        order_id: order.order_id,
+        theme: { color: '#6366f1' },
+        handler: async (resp: {
+          razorpay_order_id: string
+          razorpay_payment_id: string
+          razorpay_signature: string
+        }) => {
+          await endpoints.verifyPayment(resp)
+          resolve()
+        },
+        modal: { ondismiss: () => resolve() },
+      })
+      rzp.open()
+    }
+    if (w.Razorpay) return launch()
+    const s = document.createElement('script')
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js'
+    s.onload = launch
+    s.onerror = () => reject(new Error('Could not load Razorpay Checkout'))
+    document.body.appendChild(s)
+  })
+}
 
 export default function Settings() {
   const members = useApi<Member[]>(() => endpoints.members(), [])
   const invoices = useApi<Invoice[]>(() => endpoints.invoices(), [])
+  const billing = useApi<{ configured: boolean; plans: PlanInfo[] }>(
+    () => endpoints.billingPlans(),
+    { configured: false, plans: [] },
+  )
 
   const [tab, setTab] = useState<Tab>('team')
   const [whatsapp, setWhatsapp] = useState(true)
   const [hindiDigest, setHindiDigest] = useState(true)
+  const [paying, setPaying] = useState<string | null>(null)
+
+  async function subscribe(plan: PlanInfo) {
+    setPaying(plan.id)
+    try {
+      await startCheckout(plan)
+      invoices.reload()
+    } catch (err) {
+      console.error('checkout failed', err)
+      alert((err as Error).message || 'Could not start checkout.')
+    } finally {
+      setPaying(null)
+    }
+  }
 
   return (
     <div>
@@ -93,16 +150,16 @@ export default function Settings() {
               <li className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium">Digest language: Hindi</div>
-                  <div className="text-xs text-ink-3">Narratives render via IndicTrans2 — English fallback</div>
+                  <div className="text-xs text-ink-3">Narratives are English-only for now; Hindi/Gujarati are on the roadmap.</div>
                 </div>
                 <Toggle checked={hindiDigest} onChange={setHindiDigest} label="Hindi digest" />
               </li>
               <li className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium">Slack #security-ops</div>
-                  <div className="text-xs text-ink-3">All L2/L3 action notifications</div>
+                  <div className="text-xs text-ink-3">L2/L3 action notifications — connector not wired yet</div>
                 </div>
-                <Badge tone="green"><Check size={11} aria-hidden /> CONNECTED</Badge>
+                <Badge tone="neutral">NOT CONNECTED</Badge>
               </li>
             </ul>
           </Card>
@@ -135,27 +192,35 @@ export default function Settings() {
 
       {tab === 'billing' && (
         <div className="space-y-4">
+          <p className="rounded-md border border-status-warning/30 bg-status-warning/5 px-3 py-2.5 text-xs leading-relaxed text-ink-2">
+            Indicative pricing — billing is not live yet; contact sales.
+          </p>
           <div className="grid gap-3 md:grid-cols-3">
-            {PLANS.map((p) => (
-              <div key={p.name} className={cn(
-                'rounded-lg border p-5',
-                p.current ? 'border-accent bg-accent-dim/30' : 'border-border bg-surface',
-              )}>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-mono text-sm font-bold">{p.name}</h3>
-                  {p.current && <Badge tone="green">CURRENT</Badge>}
+            {billing.data.plans.length === 0 && (
+              <p className="col-span-3 font-mono text-xs text-ink-3">Loading plans…</p>
+            )}
+            {billing.data.plans.map((p) => (
+              <div key={p.id} className="rounded-lg border border-border bg-surface p-5">
+                <h3 className="font-mono text-sm font-bold">{p.name}</h3>
+                <div className="font-data mt-3 text-2xl font-bold">
+                  ₹{p.amount_inr.toLocaleString('en-IN')}
+                  <span className="text-sm font-normal text-ink-3">/mo + GST</span>
                 </div>
-                <div className="font-data mt-3 text-2xl font-bold">{p.price}<span className="text-sm font-normal text-ink-3">{p.per}</span></div>
-                <p className="mt-2.5 text-xs leading-relaxed text-ink-2">{p.pitch}</p>
-                {!p.current && (
-                  <Button size="sm" variant="outline" className="mt-4" disabled title="Razorpay checkout is roadmap — billing is fixture-tier in this build">
-                    Switch plan
-                  </Button>
-                )}
+                <p className="mt-2.5 text-xs leading-relaxed text-ink-2">{PLAN_PITCH[p.id] ?? ''}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-4"
+                  disabled={!billing.data.configured || paying !== null}
+                  title={billing.data.configured ? 'Pay with Razorpay' : 'Billing not configured on this server'}
+                  onClick={() => subscribe(p)}
+                >
+                  {paying === p.id ? 'Opening…' : 'Subscribe'}
+                </Button>
               </div>
             ))}
           </div>
-          <Card title="Invoices — GST · UPI autopay via Razorpay" padded={false}>
+          <Card title="Invoices" padded={false}>
             <Table head={['Invoice', 'Period', 'Amount', 'Tax', 'Status']}>
               {invoices.data.length === 0 && (
                 <tr>

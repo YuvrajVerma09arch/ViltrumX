@@ -104,13 +104,6 @@ export default function Landing() {
                   View live demo
                 </LiquidButton>
               </div>
-              <div className="mt-8 flex items-center gap-2">
-                <span className="relative flex h-3 w-3 items-center justify-center" aria-hidden>
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-                </span>
-                <p className="font-mono text-xs text-accent-bright">8/8 agents nominal · demo tenant live now</p>
-              </div>
             </motion.div>
 
             {/* Right: 3D scene (streams from prod.spline.design — needs network) */}

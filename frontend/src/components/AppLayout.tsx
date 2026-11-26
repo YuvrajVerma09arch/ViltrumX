@@ -10,37 +10,47 @@ import { cn } from '../lib/utils'
 // Shape of a governed action from /actions. Declared locally so the layout
 // has no dependency on the demo fixtures in `data/mock.ts`.
 type Action = { id: string; type: string; target: string; level: string; status: string }
+// Minimal agent shape for the sidebar health chip.
+type Agent = { id: string; status: 'active' | 'idle' | 'awaiting approval' }
 
-const NAV = [
+type NavItem = {
+  to: string
+  icon: typeof LayoutDashboard
+  label: string
+  module: string | null
+  end?: boolean
+}
+
+const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: 'Overview',
     items: [
-      { to: '/app', end: true, icon: LayoutDashboard, label: 'Command Deck' },
-      { to: '/app/risk', icon: TrendingUp, label: 'Risk & Prediction' },
+      { to: '/app', end: true, icon: LayoutDashboard, label: 'Command Deck', module: 'command_deck' },
+      { to: '/app/risk', icon: TrendingUp, label: 'Risk & Prediction', module: 'risk' },
     ],
   },
   {
     section: 'Ontology',
     items: [
-      { to: '/app/ontology', icon: Network, label: 'Ontology Explorer' },
-      { to: '/app/inventory', icon: Boxes, label: 'Attack Surface' },
+      { to: '/app/ontology', icon: Network, label: 'Ontology Explorer', module: 'ontology' },
+      { to: '/app/inventory', icon: Boxes, label: 'Attack Surface', module: 'inventory' },
     ],
   },
   {
     section: 'Operations',
     items: [
-      { to: '/app/investigation', icon: Search, label: 'Investigations' },
-      { to: '/app/autonomy', icon: SlidersHorizontal, label: 'Autonomy Console' },
-      { to: '/app/provenance', icon: History, label: 'Provenance' },
-      { to: '/app/purple-team', icon: Swords, label: 'Purple Team' },
+      { to: '/app/investigation', icon: Search, label: 'Investigations', module: 'investigation' },
+      { to: '/app/autonomy', icon: SlidersHorizontal, label: 'Autonomy Console', module: 'autonomy' },
+      { to: '/app/provenance', icon: History, label: 'Provenance', module: 'provenance' },
+      { to: '/app/purple-team', icon: Swords, label: 'Purple Team', module: 'purple' },
     ],
   },
   {
     section: 'Business',
     items: [
-      { to: '/app/reports', icon: FileCheck2, label: 'Compliance Center' },
-      { to: '/app/onboarding', icon: Plug, label: 'Integrations' },
-      { to: '/app/settings', icon: Settings, label: 'Settings' },
+      { to: '/app/reports', icon: FileCheck2, label: 'Compliance Center', module: 'compliance' },
+      { to: '/app/onboarding', icon: Plug, label: 'Integrations', module: null },
+      { to: '/app/settings', icon: Settings, label: 'Settings', module: null },
     ],
   },
 ]
@@ -77,6 +87,33 @@ export default function AppLayout() {
   const actions = useApi<Action[]>(() => endpoints.actions(), [])
   const pending = actions.data.filter((a) => a.status === 'proposed')
 
+  // Agent health is derived from the live roster, never a fixed "8/8". When
+  // the request hasn't returned data there is nothing honest to show.
+  const agents = useApi<Agent[]>(() => endpoints.agents(), [])
+  const activeAgents = agents.data.filter((a) => a.status !== 'idle').length
+  const agentsLabel = agents.data.length
+    ? `${activeAgents}/${agents.data.length} agents active`
+    : 'Agents — no live data'
+
+  // Per-tenant module entitlements: two customers on the same platform can
+  // have different module sets. Hide nav items the tenant isn't entitled to;
+  // items with module:null (Integrations, Settings) always show. When the
+  // entitlements call fails we show everything (fail-open on navigation — the
+  // API still enforces access; we only avoid hiding the whole app on a hiccup).
+  const entitlements = useApi<{ modules: string[] }>(() => endpoints.entitlements(), {
+    modules: [],
+  })
+  const entitled = entitlements.data.modules
+  const navVisible = (module?: string | null) =>
+    !module || entitled.length === 0 || entitled.includes(module)
+
+  // Startup verification (P4): a tenant must verify its company domain before
+  // connecting live data sources. Surface that requirement honestly.
+  const verif = useApi<{ domain_verified: boolean }>(() => endpoints.verifyStatus(), {
+    domain_verified: true, // fail-open: don't nag if the check itself fails
+  })
+  const needsVerification = verif.live && verif.data.domain_verified === false
+
   const nameParts = (authStore.user?.name ?? 'A').trim().split(/\s+/)
   const userInitials = ((nameParts[0]?.[0] ?? 'A') + (nameParts[nameParts.length - 1]?.[0] ?? 'A')).toUpperCase()
 
@@ -109,11 +146,11 @@ export default function AppLayout() {
                 {group.section}
               </div>
               <ul className="space-y-0.5">
-                {group.items.map((item) => (
+                {group.items.filter((item) => navVisible(item.module)).map((item) => (
                   <li key={item.to}>
                     <NavLink
                       to={item.to}
-                      end={'end' in item && item.end}
+                      end={item.end}
                       className={({ isActive }) =>
                         cn(
                           'flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors duration-150',
@@ -134,10 +171,16 @@ export default function AppLayout() {
         </nav>
         <div className="rounded-md border border-border-subtle bg-bg px-3 py-2.5">
           <div className="flex items-center gap-2 font-mono text-[11px] text-ink-2">
-            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-status-good" aria-hidden />
-            8/8 agents nominal
+            <span
+              className={cn(
+                'h-1.5 w-1.5 rounded-full',
+                agents.data.length ? 'bg-status-good' : 'bg-ink-3',
+                agents.data.length ? 'pulse-dot' : '',
+              )}
+              aria-hidden
+            />
+            {agentsLabel}
           </div>
-          <div className="mt-1 font-mono text-[10px] text-ink-3">last sweep 03:00 IST · passed</div>
         </div>
       </aside>
 
@@ -164,6 +207,19 @@ export default function AppLayout() {
             </div>
           </div>
         )}
+        {needsVerification && (
+          <div className="flex items-center justify-between gap-3 border-b border-status-warning/40 bg-status-warning/10 px-5 py-2.5 text-sm">
+            <span className="text-ink-2">
+              Verify your company domain to connect live data sources.
+            </span>
+            <Link
+              to="/app/settings"
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg hover:bg-accent-bright"
+            >
+              Verify now
+            </Link>
+          </div>
+        )}
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-border bg-bg/90 px-5 backdrop-blur">
           <div className="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-ink-2">
             <span className="grid h-5 w-5 place-items-center rounded bg-accent-dim font-mono text-[10px] font-bold text-accent-bright">
@@ -172,7 +228,7 @@ export default function AppLayout() {
             {authStore.tenant?.name ?? 'ViltrumX'}
           </div>
           <div className="flex items-center gap-3">
-            <span className="hidden font-mono text-[11px] text-ink-3 md:block">env: <span className="text-ink-2">demo-tenant</span> · ap-south-1</span>
+            <span className="hidden font-mono text-[11px] text-ink-3 md:block">env: <span className="text-ink-2">{authStore.tenant?.slug ?? 'no tenant'}</span></span>
 
             {/* Notifications — real pending L4 decisions + recent agent activity.
                 The dot only shows when something actually needs the human. */}

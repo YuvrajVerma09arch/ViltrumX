@@ -30,6 +30,15 @@ type Evidence = { id: string; kind: string; source: string; excerpt: string }
 type IncidentDetail = Incident & { attackChain?: ChainStep[]; evidence?: Evidence[] }
 type Action = { id: string; type: string; level: AutonomyLevel; status: string }
 
+// Honest empty state for the narrative card: if the narrative endpoint is
+// unreachable we show that, rather than a fabricated demo incident story.
+const EMPTY_NARRATIVE: typeof NARRATIVE.en = {
+  technical: 'No narrative available for this incident yet.',
+  founder: 'No narrative available for this incident yet.',
+  impact: [],
+  decision: '',
+}
+
 export default function Investigation() {
   const [lang, setLang] = useState<Lang>('en')
   const [founderMode, setFounderMode] = useState(false)
@@ -42,11 +51,12 @@ export default function Investigation() {
     [incidentId],
   )
 
-  // The Explainability agent renders EN/HI/GU server-side (IndicTrans2 for the
-  // Indic languages); the local i18n strings are the offline fallback.
+  // The Explainability agent can render EN/HI/GU server-side; until those
+  // endpoints are live the English strings are the fallback. On failure we
+  // fall back to an honest empty narrative, never a fabricated demo story.
   const narrative = useApi<typeof NARRATIVE.en>(
     () => endpoints.narrative(incidentId, lang),
-    NARRATIVE[lang],
+    EMPTY_NARRATIVE,
     [incidentId, lang],
   )
 
@@ -168,7 +178,7 @@ export default function Investigation() {
               </>
             )}
             <p className="mt-3 border-t border-border-subtle pt-2.5 font-mono text-[10px] text-ink-3">
-              grounded on ontology snapshot 03:33:02 · rendered via IndicTrans2 · Critic-verified 0.96
+              AI narrative · grounded on the incident record · English only for now
             </p>
           </Card>
 
@@ -199,9 +209,9 @@ export default function Investigation() {
               <dt className="text-ink-3">MITRE techniques</dt>
               <dd className="flex flex-wrap gap-1">{inc.mitre.length ? inc.mitre.map((m) => <Badge key={m} tone="purple">{m}</Badge>) : <span className="text-ink-3">—</span>}</dd>
               <dt className="text-ink-3">Similar precedent</dt>
-              <dd className="text-xs text-ink-2">INC-041 (Qdrant recall, 0.83 sim)</dd>
+              <dd className="text-xs text-ink-2"><span className="text-ink-3">—</span></dd>
               <dt className="text-ink-3">Assigned</dt>
-              <dd className="inline-flex items-center gap-1.5 text-xs"><Briefcase size={12} aria-hidden /> Digital Detective + you</dd>
+              <dd className="inline-flex items-center gap-1.5 text-xs"><Briefcase size={12} aria-hidden /> Unassigned</dd>
             </dl>
           </Card>
         </div>

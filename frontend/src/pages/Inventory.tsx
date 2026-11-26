@@ -24,6 +24,12 @@ export default function Inventory() {
   const inventory = useApi<Row[]>(() => endpoints.inventory(tab), [], [tab])
   const rows = inventory.data
 
+  // Posture summary is derived from the rows on screen, not a fixed script, so
+  // it can never claim an MFA or connector state the data doesn't back up.
+  const highRisk = rows.filter((r) => r.risk > 70)
+  const noMfa = rows.filter((r) => r.mfa === false)
+  const crownJewels = rows.filter((r) => r.criticality === 'crown-jewel')
+
   return (
     <div>
       <PageHeader
@@ -71,26 +77,25 @@ export default function Inventory() {
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <Card title="Posture summary">
           <ul className="space-y-2 text-sm text-ink-2">
-            <li>· 6/6 human identities on MFA — <span className="text-status-good">enforced</span></li>
-            <li>· 1 service account without MFA (<span className="font-mono text-xs">ci-deploy-bot</span>) — key-scoped</li>
-            <li>· 1 repo with secrets in history — purge scheduled tonight</li>
+            <li>· {rows.length} object{rows.length === 1 ? '' : 's'} in this category — <span className="text-ink-3">derived from the inventory above</span></li>
+            <li>· {highRisk.length} at risk &gt; 70</li>
+            <li>· {noMfa.length} without MFA</li>
           </ul>
         </Card>
         <Card title="Crown jewels">
           <ul className="space-y-2 font-mono text-xs text-ink-2">
-            <li>◆ s3://customers-db-backups</li>
-            <li>◆ rds/payments-db</li>
-            <li>◆ Razorpay settlement account</li>
-            <li>◆ paykraft-core</li>
+            {crownJewels.length === 0 && (
+              <li className="text-ink-3">None tagged in this category yet.</li>
+            )}
+            {crownJewels.map((r) => (
+              <li key={r.name}>◆ {r.name}</li>
+            ))}
           </ul>
           <p className="mt-3 text-xs text-ink-3">Any action touching these requires human approval (L4), regardless of the default dial.</p>
         </Card>
         <Card title="Coverage">
           <ul className="space-y-2 text-sm text-ink-2">
-            <li>· Google Workspace — <span className="text-status-good">streaming</span></li>
-            <li>· GitHub audit log — <span className="text-status-good">streaming</span></li>
-            <li>· AWS CloudTrail — <span className="text-status-good">streaming</span></li>
-            <li>· Razorpay — <span className="text-ink-3">not connected</span></li>
+            <li>· Connectors — <span className="text-ink-3">no live connector data yet</span></li>
           </ul>
         </Card>
       </div>

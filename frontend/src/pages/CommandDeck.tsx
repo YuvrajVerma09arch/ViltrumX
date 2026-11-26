@@ -45,7 +45,7 @@ export default function CommandDeck() {
   const actions = useApi<Action[]>(() => endpoints.actions(), [])
   const seed = useApi<FeedLine[]>(() => endpoints.feed(), [])
   const readiness = useApi<ReadinessPoint[]>(() => endpoints.readiness(), [])
-  const { lines, connected } = useLiveFeed(seed.data)
+  const { lines, mode } = useLiveFeed(seed.data)
 
   const lastReadiness = readiness.data[readiness.data.length - 1]
 
@@ -73,7 +73,9 @@ export default function CommandDeck() {
       >
         <div className="flex items-center gap-2">
           <DataSource live={incidents.live} loading={incidents.loading} />
-          {connected && <Badge tone="green">STREAM CONNECTED</Badge>}
+          {mode === 'live' && <Badge tone="green">LIVE</Badge>}
+          {mode === 'polling' && <Badge tone="amber">POLLING</Badge>}
+          {mode === 'offline' && <Badge tone="neutral">OFFLINE</Badge>}
           {stats.pending > 0 && (
             <Badge tone="red">
               <ShieldAlert size={11} aria-hidden /> {stats.pending} L4 DECISION
