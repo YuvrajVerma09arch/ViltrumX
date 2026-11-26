@@ -25,12 +25,16 @@ htmlcov/
 .vscode/
 *.swp
 .opencode/
+.claude/
 tasks/
 
 # Data stores (local volumes if mapped into repo)
 neo4j_data/
 postgres_data/
 qdrant_data/
+
+# Django collectstatic output (built at deploy by entrypoint.sh)
+backend/staticfiles/
 
 output/
 generate_pptx.py
