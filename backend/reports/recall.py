@@ -124,19 +124,30 @@ def remember(incident_id: str, text: str, *, tenant_id: int, meta: dict | None =
         return False
 
 
-def recall(text: str, *, k: int = 5, score_floor: float = 0.7) -> list:
+def recall(text: str, *, k: int = 5, score_floor: float = 0.7, tenant_id=None) -> list:
     """
     Look up past incidents whose summary is most similar to `text`.
-    Returns [{ "incident_id", "score", "payload" }] sorted desc, score ≥ floor.
+
+    When ``tenant_id`` is given, results are filtered to that tenant so one
+    customer's incidents never surface in another's investigation (the Qdrant
+    collection is shared). Returns [{ "incident_id", "score", "payload" }]
+    sorted desc, score ≥ floor.
     """
     client = _get_client()
     if client is None:
         return _fixture_recall(text)
     vector = encode(text)
     try:
-        hits = client.search(
-            collection_name=COLLECTION, query_vector=vector, limit=k,
-        )
+        search_kwargs = {"collection_name": COLLECTION, "query_vector": vector, "limit": k}
+        if tenant_id is not None:
+            from qdrant_client.http import models as qmodels
+
+            search_kwargs["query_filter"] = qmodels.Filter(
+                must=[qmodels.FieldCondition(
+                    key="tenant_id", match=qmodels.MatchValue(value=tenant_id),
+                )]
+            )
+        hits = client.search(**search_kwargs)
         out = []
         for h in hits:
             score = float(h.score)
