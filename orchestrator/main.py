@@ -73,16 +73,26 @@ def _summarise(state: dict) -> str:
     return " · ".join(bits) or "no-op"
 
 
-def run_one(tenant_id: int, raw_event: dict, event_id: int | None = None) -> dict:
+def run_one(
+    tenant_id: int, raw_event: dict, event_id: int | None = None, tenant_slug: str = ""
+) -> dict:
     from graph import run_event
+    from tools.django_client import set_tenant_slug
+
+    # Bind the slug for this execution so every agent's API call sends the
+    # correct X-Tenant header (multi-tenant correctness).
+    if tenant_slug:
+        set_tenant_slug(tenant_slug)
+        raw_event = {**raw_event, "tenant_slug": tenant_slug}
 
     started = time.time()
     state = run_event(tenant_id, raw_event, event_id=event_id)
     took = (time.time() - started) * 1000
     logger.info(
-        "event %s (%s) → %s  [%.0f ms]",
+        "event %s (%s) tenant=%s → %s  [%.0f ms]",
         event_id if event_id is not None else "-",
         raw_event.get("event_type") or raw_event.get("name") or "?",
+        tenant_slug or "-",
         _summarise(state),
         took,
     )
@@ -102,15 +112,18 @@ def cmd_selftest(args) -> int:
     nodes = sorted(n for n in graph.get_graph().nodes if not n.startswith("__"))
     logger.info("graph compiled with %d agents: %s", len(nodes), ", ".join(nodes))
 
+    # Demo tenant only (slug "paykraft"). This is a synthetic selftest event —
+    # NEVER used on a real tenant's traffic. Real events arrive via the Redis
+    # stream from the backend's ingestion pollers.
     event = {
         "source": "workspace",
         "event_type": "login_success",
         "principal": "priya.sharma@paykraft.in",
         "ip": "185.220.101.34",
-        "geo": "Moscow, RU",
+        "geo": "RU-MOW",
         "attack": True,
     }
-    state = run_one(args.tenant, event)
+    state = run_one(args.tenant, event, tenant_slug="paykraft")
     logger.info("selftest complete — graph ran end to end")
     if args.verbose:
         print(json.dumps({k: v for k, v in state.items() if v}, indent=2, default=str))
@@ -135,7 +148,7 @@ def cmd_replay(args) -> int:
     findings = 0
     for item in events:
         raw = item.get("raw", item)
-        state = run_one(args.tenant, raw, event_id=item.get("id"))
+        state = run_one(args.tenant, raw, event_id=item.get("id"), tenant_slug=args.tenant_slug)
         if state.get("actions_proposed"):
             findings += 1
         if args.delay:
@@ -175,6 +188,7 @@ def cmd_worker(args) -> int:
                 body.get("tenant_id", args.tenant),
                 body.get("raw_event", body),
                 event_id=body.get("event_id"),
+                tenant_slug=body.get("tenant_slug", ""),
             )
     except KeyboardInterrupt:
         logger.info("worker stopped")
@@ -202,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument(
         "--delay", type=float, default=0.0, help="seconds between events (demo pacing)"
     )
+    replay.add_argument("--tenant-slug", default="paykraft", help="tenant slug for X-Tenant")
     return parser
 
 

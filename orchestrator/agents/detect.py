@@ -73,14 +73,33 @@ def run(state: dict) -> dict:
 
 def _is_impossible_travel(state) -> bool:
     geo = state.get("geo_enriched") or {}
-    raw = state.get("raw_event", {}) or {}
     # An anonymising proxy/exit node overrides any login_success — treat it as a
-    # high-confidence impossible-travel signal on its own.
-    ip_known_hostile = (
-        geo.get("is_anonymous_proxy") is True
-        or raw.get("ip") in ("185.220.101.34",)
-    )
-    return bool(ip_known_hostile)
+    # high-confidence impossible-travel signal on its own. Otherwise flag a
+    # login whose resolved country differs from the tenant's home country
+    # during off-hours. Nothing here is tied to a specific hardcoded IP.
+    if geo.get("is_anonymous_proxy") is True:
+        return True
+
+    home_country = state.get("home_country") or "IN"
+    country = geo.get("country")
+    if country and country != home_country:
+        hour = _event_hour(state)
+        if hour is not None and (hour < 6 or hour > 22):
+            return True
+    return False
+
+
+def _event_hour(state):
+    raw = state.get("raw_event", {}) or {}
+    ts = raw.get("@timestamp")
+    if ts is None:
+        return None
+    try:
+        from datetime import datetime
+
+        return datetime.fromtimestamp(int(ts) / 1000).hour
+    except (TypeError, ValueError):
+        return None
 
 
 def get_raw_event(event_id):

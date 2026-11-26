@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextvars import ContextVar
 
 import httpx
 
@@ -23,7 +24,13 @@ logger = logging.getLogger(__name__)
 # Trailing-slash tolerant: we always join paths with /api/v1/.
 DJANGO_BASE = os.environ.get("DJANGO_BASE_URL", "http://localhost:8000").rstrip("/")
 SERVICE_TOKEN = os.environ.get("ORCHESTRATOR_SERVICE_TOKEN", "")
+# Fallback tenant slug when a message doesn't carry one (single-tenant/demo).
+DEFAULT_TENANT_SLUG = os.environ.get("ORCHESTRATOR_TENANT_SLUG", "")
 TIMEOUT = float(os.environ.get("ORCHESTRATOR_HTTP_TIMEOUT", "10"))
+
+# Per-execution tenant slug, forwarded as X-Tenant so the backend binds the
+# service user's Membership to the RIGHT tenant (multi-tenant correctness).
+_tenant_slug: ContextVar[str] = ContextVar("tenant_slug", default="")
 
 # A shared connection pool keeps latency low across the orchestrator's
 # many small calls per event.
@@ -37,9 +44,25 @@ def _headers(json: bool = True) -> dict:
     # when no token is configured so the failure reads as a clean 401 instead.
     if SERVICE_TOKEN:
         h["Authorization"] = f"Bearer {SERVICE_TOKEN}"
+    slug = _current_tenant_slug() or DEFAULT_TENANT_SLUG
+    if slug:
+        h["X-Tenant"] = slug
     if json:
         h["Content-Type"] = "application/json"
     return h
+
+
+def set_tenant_slug(slug: str | None) -> None:
+    """Bind the tenant slug for the current execution context (X-Tenant).
+
+    The worker processes many tenants; a contextvar keeps the header correct
+    per-message without threading a slug through every agent call.
+    """
+    _tenant_slug.set(slug or "")
+
+
+def _current_tenant_slug() -> str:
+    return _tenant_slug.get() or ""
 
 
 def get_client() -> httpx.Client:
@@ -61,7 +84,9 @@ def call(method: str, path: str, *, json=None, params=None, expect_json: bool = 
     """
     try:
         client = get_client()
-        r = client.request(method, path, json=json, params=params)
+        # Per-request headers so the X-Tenant contextvar (which can change
+        # between messages on a long-lived pool) is applied correctly.
+        r = client.request(method, path, json=json, params=params, headers=_headers())
         r.raise_for_status()
         return r.json() if expect_json else {"status": r.status_code}
     except httpx.HTTPStatusError as exc:

@@ -105,7 +105,9 @@ def run(state: dict) -> dict:
             }]
 
     state["attack_chain"] = steps
-    state["incident_id"] = _name_incident(tenant_id, principal, steps)
+    state["incident_id"] = _name_incident(
+        tenant_id, principal, steps, state.get("tenant_slug", "")
+    )
 
     # ── 3. Qdrant recall — "seen this before?" ─────────────────────────────
     recall_text = _recall_text(steps, raw)
@@ -195,6 +197,20 @@ def _step_detail(sig: str, ev: dict) -> str:
     }.get(sig, f"anomalous {ev.get('event_type', 'event')} on {target}")
 
 
+def _is_foreign_geo(ev: dict) -> bool:
+    """A login whose geo isn't the tenant's home country (default IN).
+
+    Derived from the event's enriched geo/country, never a hardcoded IP or a
+    literal country string.
+    """
+    country = str(ev.get("country") or ev.get("geo") or "")
+    if not country:
+        return False
+    home = ev.get("home_country") or "IN"
+    # geo may be "IN-KA"; compare the ISO-3166 alpha-2 prefix.
+    return country[:2].upper() != str(home).upper()
+
+
 def _classify(ev: dict) -> str | None:
     """Best-effort event signature from one raw event's fields."""
     etype = str(ev.get("event_type") or ev.get("eventName") or ev.get("action") or "")
@@ -205,13 +221,11 @@ def _classify(ev: dict) -> str | None:
         attempt = int(attempt or 1)
     except (TypeError, ValueError):
         attempt = 1
-    geo = (ev.get("geo") or ev.get("country") or "")
-    ip = ev.get("ip") or ev.get("ipAddress") or ev.get("sourceIPAddress") or ""
     target = (ev.get("target") or ev.get("bucket") or "").lower()
 
     if "login_failure" in etype_low and attempt >= 3:
         return "mfa_fatigue"
-    if "login" in etype_low and ("RU" in (geo or "") or str(ip) == "185.220.101.34"):
+    if "login" in etype_low and _is_foreign_geo(ev):
         return "impossible_travel" if success else "mfa_fatigue"
     if "personal_access_token.create" in etype_low or "personal_access_token" in etype_low:
         return "token_creation"
@@ -265,17 +279,26 @@ def _incident_title(steps) -> str:
     return "Anomalous event"
 
 
-def _name_incident(tenant_id, principal, steps) -> str:
-    """Stable-ish incident id — the backend enforces unique-per-tenant."""
-    if "s3_exfil_burst" in [s["finding_type"] for s in steps]:
-        return "INC-042"  # the demo attack — frontend & seed story expect this
-    if "insider_export" in [s["finding_type"] for s in steps]:
-        return "INC-043"
+def _name_incident(tenant_id, principal, steps, tenant_slug: str = "") -> str:
+    """Stable-ish incident id — the backend enforces unique-per-tenant.
+
+    The friendly INC-042/INC-043 ids exist only so the seeded PayKraft viva
+    demo keeps its scripted storyline. Every real tenant gets a deterministic
+    per-day id derived from the principal + MITRE signature so two different
+    customers (or two different attacks) never collide on a fixed id.
+    """
+    finding_types = [s["finding_type"] for s in steps]
+    if tenant_slug == "paykraft":
+        if "s3_exfil_burst" in finding_types:
+            return "INC-042"  # the demo attack — frontend & seed story expect this
+        if "insider_export" in finding_types:
+            return "INC-043"
+
     short_principal = (principal or "user").split("@")[0]
     # md5, not hash(): PYTHONHASHSEED randomises str hashing per process, so
     # hash() would give the same incident a different id on every restart.
-    signature = "|".join(s.get("mitre", "") for s in steps)
-    suffix = int(
-        hashlib.md5(signature.encode(), usedforsecurity=False).hexdigest()[:4], 16
-    ) % 1000
-    return f"INC-{short_principal}-{suffix:03d}"
+    signature = "|".join(s.get("mitre", "") for s in steps) + "|" + short_principal
+    digest = hashlib.md5(signature.encode(), usedforsecurity=False).hexdigest()[:6].upper()
+    from datetime import UTC, datetime
+    day = datetime.now(tz=UTC).strftime("%Y%m%d")
+    return f"INC-{day}-{digest}"
