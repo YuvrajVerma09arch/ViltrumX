@@ -23,15 +23,19 @@ WS_CLOSE_FORBIDDEN = 4403  # authenticated, but not a member of the tenant
 
 class TenantStreamConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        # AuthMiddlewareStack (see viltrumx/asgi.py) populates scope["user"].
+        # Either AuthMiddlewareStack (session cookie) or JWTAuthMiddleware
+        # (?token=<jwt>) populates scope["user"] — see viltrumx/asgi.py.
         # Never let an anonymous client subscribe to a tenant stream.
         user = self.scope.get("user")
         if user is None or not user.is_authenticated:
             await self.close(code=WS_CLOSE_UNAUTHENTICATED)
             return
 
-        # Parse the tenant id defensively even though the route uses <int:...>.
+        # Parse the tenant id from the route; if the route omits a valid id,
+        # fall back to the user's own membership so a JWT client still connects.
         tenant_id = self._tenant_id_from_scope()
+        if tenant_id is None:
+            tenant_id = await self._default_tenant_for(user)
         if tenant_id is None:
             await self.close(code=WS_CLOSE_BAD_REQUEST)
             return
@@ -55,6 +59,12 @@ class TenantStreamConsumer(AsyncWebsocketConsumer):
         except (TypeError, ValueError):
             return None
         return tenant_id if tenant_id > 0 else None
+
+    @database_sync_to_async
+    def _default_tenant_for(self, user):
+        """The user's first tenant — used when the socket URL has no tenant id."""
+        membership = Membership.objects.filter(user=user).order_by("id").first()
+        return membership.tenant_id if membership else None
 
     @database_sync_to_async
     def _is_member(self, user, tenant_id):
