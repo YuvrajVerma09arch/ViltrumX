@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from connectors.models import Connector, OAuthState
 from connectors.tasks import ingest_event
 from core.models import Tenant
-from core.tenancy import tenant_for
+from core.tenancy import require_role, tenant_for
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +308,7 @@ class GitHubOAuthDisconnectView(APIView):
 
     def post(self, request):
         tenant = tenant_for(request)
+        require_role(request, tenant, "Admin")
         Connector.objects.filter(tenant=tenant, connector_id="gh").delete()
         return Response({"disconnected": True})
 
@@ -357,3 +358,165 @@ def _extract_fields(event_type: str, payload: dict) -> dict:
         repo = (payload.get("repository") or {}).get("full_name", "")
         return {"repo": repo}
     return {}
+
+
+# ── Generic multi-provider credentials surface ───────────────────────────────
+# Required keys per provider slug. Empty dict means "no user-supplied secrets
+# needed — configuration is via server settings / IAM role" (google, aws).
+REQUIRED_CREDENTIAL_KEYS = {
+    "github": {"access_token", "org"},
+    "google": set(),
+    "google_workspace": set(),
+    "aws": set(),
+    "slack": {"webhook_url"},
+    "razorpay": {"key_id", "key_secret"},
+}
+
+# Keys we accept + persist per provider even when not required (e.g. slack's
+# optional user token for audit-log polling). Anything else in the body is
+# dropped so a caller can never smuggle arbitrary JSON into the model.
+ALLOWED_CREDENTIAL_KEYS = {
+    "github": {"access_token", "org"},
+    "google": {"service_account_json", "admin_email"},
+    "google_workspace": {"service_account_json", "admin_email"},
+    "aws": {"role_arn", "region"},
+    "slack": {"webhook_url", "user_token"},
+    "razorpay": {"key_id", "key_secret"},
+    "m365": {"tenant_id", "client_id", "client_secret"},
+}
+
+
+def _resolve_provider(connector_id: str, body_provider: str) -> str:
+    from connectors.providers import provider_for_connector_id
+
+    return provider_for_connector_id(connector_id, override=body_provider)
+
+
+def _known_connector_name(connector_id: str) -> str | None:
+    from core import demo_data
+
+    for fixture in demo_data.CONNECTORS:
+        if fixture["id"] == connector_id:
+            return fixture["name"]
+    return None
+
+
+class ConnectorCredentialsView(APIView):
+    """Store per-provider credentials for a connector (secrets never echoed).
+
+    POST body may carry ``provider`` plus the provider's keys, e.g.::
+
+        github   -> {access_token, org}
+        slack    -> {webhook_url}
+        razorpay -> {key_id, key_secret}
+        google   -> {} (configured server-side via GOOGLE_SERVICE_ACCOUNT_JSON)
+        aws      -> {} (configured via AWS_ROLE_ARN / instance role)
+
+    On success the connector is marked ``provider=<slug>`` and
+    ``status=connected``; the response returns only the provider slug, status,
+    and the *names* of stored keys — never their values.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, connector_id: str):
+        tenant = tenant_for(request)
+        require_role(request, tenant, "Admin")
+        # Startup verification gate (P4) — same rule as ConnectorConnectView.
+        # This is the real credential path, so it must enforce it too.
+        if tenant.slug != "paykraft" and not tenant.domain_verified:
+            return Response(
+                {"detail": "Verify your company domain before connecting live sources.",
+                 "verify": "/api/v1/verify/domain/start"},
+                status=403,
+            )
+        if not tenant.connector_enabled(connector_id):
+            return Response(
+                {"detail": "This connector is not included in your plan."},
+                status=403,
+            )
+
+        body = request.data if isinstance(request.data, dict) else {}
+        provider = _resolve_provider(connector_id, str(body.get("provider", "")))
+        if not provider or provider not in REQUIRED_CREDENTIAL_KEYS:
+            return Response(
+                {"detail": f"Unknown or unsupported provider for '{connector_id}'."},
+                status=400,
+            )
+
+        required = REQUIRED_CREDENTIAL_KEYS[provider]
+        allowed = ALLOWED_CREDENTIAL_KEYS.get(provider, set())
+        provided = {k: v for k, v in body.items() if k in allowed}
+        missing = sorted(k for k in required if not provided.get(k))
+        if missing:
+            return Response(
+                {"detail": f"Missing required credential keys: {', '.join(missing)}."},
+                status=400,
+            )
+
+        name = _known_connector_name(connector_id) or provider.title()
+        defaults = {"name": name, "provider": provider, "status": "connected"}
+        if provider == "github":
+            # Mirror the OAuth columns so the GitHub poller + webhook tenant
+            # resolution work whether creds arrive via OAuth or this endpoint.
+            defaults["github_org_login"] = str(provided.get("org", ""))
+
+        connector, _ = Connector.objects.update_or_create(
+            tenant=tenant, connector_id=connector_id, defaults=defaults
+        )
+        if provider == "github" and provided.get("access_token"):
+            connector.github_access_token = str(provided["access_token"])
+            connector.save(update_fields=["github_access_token"])
+
+        # Merge into the existing credentials dict — never blow away keys from
+        # a prior call (e.g. an OAuth token already present).
+        merged = dict(connector.credentials or {})
+        merged.update({k: v for k, v in provided.items() if v not in (None, "")})
+        connector.credentials = merged
+        connector.last_error = ""
+        connector.save(update_fields=["credentials", "last_error"])
+
+        logger.info(
+            "connector credentials stored: tenant=%s connector=%s provider=%s keys=%s",
+            tenant.id,
+            connector_id,
+            provider,
+            sorted(provided),
+        )
+        return Response(
+            {
+                "connectorId": connector_id,
+                "provider": provider,
+                "status": connector.status,
+                "storedKeys": sorted(merged),
+            }
+        )
+
+
+class ConnectorDisconnectView(APIView):
+    """Disconnect a connector: wipe secrets, keep the row as ``available``.
+
+    Deleting the row would lose the audit linkage and let a stale UI show the
+    connector as available-but-with-history. Instead we clear credentials and
+    demote the status, so re-connecting is a clean upsert.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, connector_id: str):
+        tenant = tenant_for(request)
+        require_role(request, tenant, "Admin")
+        updated = Connector.objects.filter(
+            tenant=tenant, connector_id=connector_id
+        ).update(
+            status="available",
+            credentials={},
+            last_error="",
+            provider="",
+            github_access_token="",
+            github_org_login="",
+            github_installation_id=None,
+        )
+        if not updated:
+            return Response({"detail": "Connector not found."}, status=404)
+        return Response({"disconnected": True, "connectorId": connector_id})

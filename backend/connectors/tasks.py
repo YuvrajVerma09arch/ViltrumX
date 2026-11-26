@@ -1,6 +1,7 @@
 """
 Celery ingestion tasks — normalize raw events, upsert the ontology, score
-anomalies, and push live updates to the Command Deck WebSocket stream.
+anomalies, and push live updates to the Command Deck WebSocket stream; plus
+the connector polling dispatcher that drives the per-provider pollers.
 """
 
 import logging
@@ -13,23 +14,37 @@ from connectors.synthetic import SCENARIOS, normalize
 
 logger = logging.getLogger(__name__)
 
+# The only envelope keys that map onto RawEvent columns. Anything else
+# (``external_id``, provider extras) stays in ``payload`` and never reaches the
+# model constructor.
+_ENVELOPE_FIELDS = (
+    "source",
+    "event_type",
+    "principal",
+    "target",
+    "ip",
+    "geo",
+    "occurred_at",
+    "payload",
+)
+
 
 @shared_task(bind=True, max_retries=3)
 def ingest_event(self, tenant_id: int, raw: dict):
-    """Normalize one raw log dict, upsert ontology, score, publish."""
+    """Normalize one raw log dict, then ingest it through the shared path.
+
+    Kept for the synthetic replay + GitHub webhook callers. It builds an
+    envelope with ``synthetic.normalize`` and delegates to ``_ingest_envelope``.
+    """
     from core.models import Tenant
 
     try:
         tenant = Tenant.objects.get(pk=tenant_id)
         envelope = normalize(raw)
-        event = RawEvent.objects.create(
-            tenant=tenant,
-            is_attack=raw.get("attack", False),
-            **envelope,
-        )
-        _upsert_ontology(tenant, event)
-        _score(event)
-        _publish(tenant, event)
+        # Synthetic replays carry a ground-truth attack label the flattener
+        # drops; carry it through so detection can score it.
+        envelope["is_attack"] = bool(raw.get("attack", False))
+        _ingest_envelope(tenant, envelope)
     except Exception as exc:
         logger.exception("ingest_event failed: %s", exc)
         raise self.retry(exc=exc, countdown=5) from exc
@@ -58,6 +73,95 @@ def replay_synthetic_logs(tenant_id: int, scenario: str = "inc-042"):
     _publish_feed(tenant, "Ingestion",
                   f"Replay '{scenario}' queued — {queued} events", "info")
     return {"queued": queued, "scenario": scenario}
+
+
+@shared_task
+def poll_connector(connector_id_int: int):
+    """Poll one connector via its provider module; record success/error.
+
+    Never raises into Celery: a failed provider records ``last_error`` on the
+    connector row and returns 0, so one broken connector cannot stall the beat.
+    """
+    from connectors.models import Connector
+    from connectors.providers import get_provider
+
+    connector = Connector.objects.filter(pk=connector_id_int).select_related("tenant").first()
+    if connector is None:
+        return {"error": "connector not found"}
+
+    provider = get_provider(connector.provider)
+    if provider is None:
+        connector.last_error = f"no provider module for '{connector.provider}'"
+        connector.save(update_fields=["last_error"])
+        return {"connector": connector.connector_id, "ingested": 0, "error": connector.last_error}
+
+    if not provider.is_configured(connector):
+        # Unconfigured is a normal state, not an error — leave a hint but do
+        # not flip the connector into an error status.
+        connector.last_error = "provider not configured (missing credentials)"
+        connector.last_polled_at = timezone.now()
+        connector.save(update_fields=["last_error", "last_polled_at"])
+        return {"connector": connector.connector_id, "ingested": 0, "configured": False}
+
+    try:
+        ingested = provider.poll(connector, connector.tenant)
+        connector.last_polled_at = timezone.now()
+        connector.last_error = ""
+        if connector.status != "connected":
+            connector.status = "connected"
+        connector.save(update_fields=["last_polled_at", "last_error", "status"])
+        return {"connector": connector.connector_id, "ingested": ingested}
+    except Exception as exc:  # noqa: BLE001 — record and continue
+        logger.warning("poll_connector %s failed: %s", connector.connector_id, exc)
+        connector.last_polled_at = timezone.now()
+        connector.last_error = str(exc)[:500]
+        connector.save(update_fields=["last_polled_at", "last_error"])
+        return {"connector": connector.connector_id, "ingested": 0, "error": connector.last_error}
+
+
+@shared_task
+def poll_all_connectors():
+    """Beat entry point: enqueue ``poll_connector`` for every connected connector."""
+    from connectors.models import Connector
+
+    connectors = Connector.objects.filter(status="connected").exclude(provider="")
+    queued = 0
+    for connector in connectors.only("id", "connector_id", "provider"):
+        poll_connector.delay(connector.id)
+        queued += 1
+    logger.info("poll_all_connectors enqueued %s connectors", queued)
+    return {"queued": queued}
+
+
+# ── shared ingestion path ─────────────────────────────────────────────────────
+
+def _ingest_envelope(tenant, envelope: dict) -> RawEvent | None:
+    """Create a ``RawEvent`` directly from a normalized envelope, then score
+    and publish it.
+
+    This is the single ingestion path shared by the synthetic replay, the
+    webhook receiver, and every provider poller (via ``ingest_record``). The
+    envelope must already be in normalized shape; ``external_id`` and any extra
+    keys are ignored for the model row. ``is_attack`` defaults to False.
+    """
+    payload = {k: envelope.get(k) for k in _ENVELOPE_FIELDS if envelope.get(k) is not None}
+    payload.setdefault("source", envelope.get("source", "unknown"))
+    payload.setdefault("event_type", envelope.get("event_type", "unknown"))
+    payload.setdefault("principal", envelope.get("principal", ""))
+    payload.setdefault("payload", envelope.get("payload") or {})
+    if payload.get("occurred_at") is None:
+        payload["occurred_at"] = timezone.now()
+
+    event = RawEvent.objects.create(
+        tenant=tenant,
+        is_attack=bool(envelope.get("is_attack", False)),
+        **payload,
+    )
+    _upsert_ontology(tenant, event)
+    _score(event)
+    _publish(tenant, event)
+    _publish_to_orchestrator(tenant, event)
+    return event
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -120,6 +224,50 @@ def _publish(tenant, event: RawEvent):
             f"anomaly {event.anomaly_score:.2f} [{event.source}]"
         )
         _publish_feed(tenant, "Detection", line, tone)
+
+
+def _publish_to_orchestrator(tenant, event: RawEvent):
+    """Hand a freshly-ingested event to the LangGraph orchestrator.
+
+    Publishes to the Redis channel the orchestrator worker subscribes to
+    (``viltrumx:events``). This is what makes the pipeline autonomous: a real
+    event → scored → published → the 8-agent graph runs → incident + actions.
+    Wrapped so a Redis outage NEVER breaks ingestion; the event is still stored
+    and scored, it just won't reach the graph until the publisher recovers.
+    """
+    try:
+        from django.conf import settings
+
+        if str(getattr(settings, "ORCHESTRATOR_ENABLED", "1")).lower() in (
+            "0", "false", "no", ""
+        ):
+            return
+
+        import json
+
+        import redis
+
+        channel = getattr(settings, "ORCHESTRATOR_STREAM", "viltrumx:events")
+        message = {
+            "tenant_id": tenant.id,
+            "tenant_slug": tenant.slug,
+            "event_id": event.id,
+            "raw_event": {
+                "source": event.source,
+                "event_type": event.event_type,
+                "principal": event.principal,
+                "target": event.target,
+                "ip": event.ip,
+                "geo": event.geo,
+                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else "",
+                "attack": event.is_attack,
+                "home_country": getattr(settings, "TENANT_HOME_COUNTRY", "IN"),
+            },
+        }
+        client = redis.Redis.from_url(settings.REDIS_URL)
+        client.publish(channel, json.dumps(message))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("orchestrator publish skipped: %s", exc)
 
 
 def _publish_feed(tenant, agent: str, line: str, tone: str):
