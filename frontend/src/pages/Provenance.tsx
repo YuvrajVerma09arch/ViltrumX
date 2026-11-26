@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, X, Undo2, PlayCircle, Loader2 } from 'lucide-react'
-import { PageHeader, Card, AutonomyBadge, StatusPill, Button, Table, Td, DataSource } from '../components/ui'
+import { PageHeader, Card, AutonomyBadge, StatusPill, Button, Table, Td, DataSource, Badge } from '../components/ui'
 import { endpoints } from '../lib/api'
 import { useApi } from '../lib/hooks'
 import { cn, type AutonomyLevel } from '../lib/utils'
@@ -12,10 +12,11 @@ type Action = {
   type: string
   target: string
   level: AutonomyLevel
-  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled'
+  status: 'executed' | 'proposed' | 'rolled-back' | 'scheduled' | 'manual' | 'failed'
   blastRadius: number
   time: string
   rollback: string
+  executionMode?: string
 }
 type TraceStep = { step: string; detail: string; ok: boolean }
 
@@ -118,6 +119,22 @@ export default function Provenance() {
           <div className="mb-3 rounded-md border border-border-subtle bg-bg px-3 py-2.5">
             <div className="font-mono text-sm font-semibold">{selected.type} → {selected.target}</div>
             <div className="mt-1 font-mono text-[11px] text-ink-3">rollback plan: {selected.rollback}</div>
+            {/* Honest actuation label: was this really applied, simulated, or
+                left for a human? No action is shown as 'applied' unless it was. */}
+            {selected.executionMode && (
+              <div className="mt-1.5">
+                <Badge tone={
+                  selected.executionMode === 'real' ? 'green'
+                    : selected.executionMode === 'simulated' ? 'blue'
+                    : 'amber'
+                }>
+                  {selected.executionMode === 'real' ? 'APPLIED TO PROVIDER'
+                    : selected.executionMode === 'simulated' ? 'SIMULATED (DEMO)'
+                    : selected.executionMode === 'manual' ? 'MANUAL — APPLY BY HAND'
+                    : selected.executionMode.toUpperCase()}
+                </Badge>
+              </div>
+            )}
           </div>
 
           <ol className="space-y-0">
