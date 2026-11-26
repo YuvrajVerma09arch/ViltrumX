@@ -90,33 +90,93 @@ def propose_action(
 
 
 def execute_action(action, actor="system:response-commander"):
-    """Run precondition checks, 'execute' against the demo world, arm L3 timer."""
-    _append_trace(action, "Precondition · connector write-scope granted",
-                  "write scope verified for target connector")
-    _append_trace(action, "Precondition · not a break-glass account",
-                  f"{action.target} not in break-glass list")
+    """Run precondition checks, apply the action for REAL, arm the L3 timer.
+
+    Nothing is marked ``executed`` unless external state actually changed:
+      * real provider call  → status executed, receipt stored
+      * no actuator / creds  → status ``manual`` (a human must apply it)
+      * provider call errored → status ``failed`` with last_error
+    The demo tenant is simulated (clearly labelled) so the viva storyline works.
+    """
+    from actions import actuators
+
+    _append_trace(
+        action, "Precondition · connector write-scope check",
+        "resolving actuator + credentials for the target provider",
+    )
+
+    result = actuators.actuate(action.tenant, action)
+    action.execution_receipt = result.receipt or {}
+    action.last_error = result.error or ""
+
+    if result.mode == "failed":
+        action.status = "failed"
+        action.execution_mode = "failed"
+        action.save()
+        _append_trace(action, "Execute failed", result.error or "provider call failed", ok=False)
+        _audit(action.tenant, actor, "action.failed", action=action.external_id,
+               error=result.error[:200])
+        return action
+
+    if result.mode == "manual":
+        action.status = "manual"
+        action.execution_mode = "manual"
+        action.rollback_plan = "manual — apply and revert by hand"
+        action.save()
+        _append_trace(action, "Manual action required", result.detail, ok=False)
+        _audit(action.tenant, actor, "action.manual", action=action.external_id)
+        return action
+
+    # real OR simulated (demo): treat as executed.
     action.status = "executed"
+    action.execution_mode = result.mode  # "real" | "simulated"
     action.executed_at = timezone.now()
     if action.level == "L3":
         action.auto_rollback_at = action.executed_at + timezone.timedelta(hours=1)
         _append_trace(action, "Auto-rollback armed",
                       f"L3 timer — reverts at {action.auto_rollback_at.strftime('%H:%M IST')}")
     action.save()
-    _append_trace(action, "Execute", f"{action.action_type} applied to {action.target}")
-    _append_trace(action, "Notify", "Slack #security-ops + founder digest queued")
-    _audit(action.tenant, actor, "action.executed", action=action.external_id)
+    label = "simulated (demo)" if result.mode == "simulated" else "applied"
+    _append_trace(
+        action, "Execute",
+        f"{action.action_type} {label} on {action.target} — {result.detail}",
+    )
+    _audit(action.tenant, actor, "action.executed", action=action.external_id, mode=result.mode)
     return action
 
 
 def rollback_action(action, actor):
-    """One-click undo. Appends provenance; never rewrites history."""
+    """One-click undo that actually reverts external state via the receipt."""
+    from actions import actuators
+
     if action.status != "executed":
         return None
+
+    result = actuators.revert(action.tenant, action)
+
+    if result.mode == "failed":
+        # Leave it executed — a failed revert means the change is still live.
+        action.last_error = result.error or "revert failed"
+        action.save(update_fields=["last_error"])
+        _append_trace(action, "Rollback failed", result.error or "revert failed", ok=False)
+        _audit(action.tenant, actor, "action.rollback_failed", action=action.external_id)
+        return None
+
+    if result.mode == "manual":
+        # The action's real-world effect cannot be auto-reverted. Record it as
+        # still-live and tell the human exactly what to undo.
+        action.status = "executed"
+        action.rollback_plan = f"manual revert required — {result.detail}"
+        action.save(update_fields=["rollback_plan"])
+        _append_trace(action, "Manual rollback required", result.detail, ok=False)
+        _audit(action.tenant, actor, "action.rollback_manual", action=action.external_id)
+        return None
+
     action.status = "rolled-back"
-    action.rollback_plan = "rolled back manually via Provenance Viewer"
+    action.rollback_plan = "reverted via actuator"
     action.auto_rollback_at = None
     action.save()
-    _append_trace(action, "Rollback", f"reverted by {actor} via Provenance Viewer")
+    _append_trace(action, "Rollback", f"{action.action_type} reverted by {actor} — {result.detail}")
     _audit(action.tenant, actor, "action.rolled_back", action=action.external_id)
     return action
 
@@ -177,11 +237,17 @@ def apply_due_auto_rollbacks(tenant=None):
         due = due.filter(tenant=tenant)
     reverted = []
     for action in due:
-        action.status = "rolled-back"
-        action.rollback_plan = "auto-rolled-back after 1 h, no recurrence"
-        action.auto_rollback_at = None
-        action.save()
-        _append_trace(action, "Auto-rollback", "L3 timer expired — action reverted automatically")
-        _audit(action.tenant, "system:timer", "action.auto_rolled_back", action=action.external_id)
-        reverted.append(action)
+        result = rollback_action(action, "system:timer")
+        if result is not None:
+            _append_trace(
+                result, "Auto-rollback", "L3 timer expired — action reverted automatically"
+            )
+            _audit(result.tenant, "system:timer", "action.auto_rolled_back",
+                   action=result.external_id)
+            reverted.append(result)
+        else:
+            # Could not auto-revert (manual/failed) — stop retrying so the sweep
+            # doesn't loop forever; leave the human-facing note on the action.
+            action.auto_rollback_at = None
+            action.save(update_fields=["auto_rollback_at"])
     return reverted
