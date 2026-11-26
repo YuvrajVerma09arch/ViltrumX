@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=5
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -16,7 +17,6 @@ RUN apt-get update \
  && apt-get purge -y --auto-remove build-essential python3-dev \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --no-cache-dir requests
-
 COPY . .
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
