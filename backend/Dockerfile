@@ -2,21 +2,18 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=5
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# Detection ML plane — the trained .joblib models (Isolation Forest, XGBoost,
-# Random Forest, HDBSCAN) in detection/models_store/ are loaded with joblib at
-# runtime. Without these packages the scorer silently falls back to a no-ML
-# rule-based path and INC-042 scores 0.94 instead of the trained 0.98-0.99, so
-# the demo must ship them. hdbscan has no manylinux wheel for slim, so build it
-# from source (needs a C compiler), then drop the toolchain to stay small.
+# Build tools first: hdbscan (and a few ML deps) have no aarch64/slim wheels, so
+# they compile from source and need a C toolchain. requirements.txt already lists
+# every runtime + ML dependency, so a single install covers it all; the toolchain
+# is then purged to keep the image lean.
+COPY requirements.txt .
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential python3-dev \
- && pip install --no-cache-dir scikit-learn xgboost joblib pandas hdbscan \
+ && pip install --no-cache-dir -r requirements.txt \
  && apt-get purge -y --auto-remove build-essential python3-dev \
- && rm -rf /var/lib/apt/lists/* \
- && pip install --no-cache-dir requests
+ && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
