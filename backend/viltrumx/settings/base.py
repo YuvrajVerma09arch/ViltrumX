@@ -8,6 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
+from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -58,6 +59,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # WhiteNoise serves collected static files (Django admin) straight from the
+    # ASGI app, so prod needs no separate static host behind nginx.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -113,7 +117,20 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "staticfiles": {
+        # Content-hashed + gzipped assets, served by WhiteNoise. Shared by all
+        # environments; collectstatic (entrypoint.sh) populates STATIC_ROOT.
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# nginx terminates TLS and forwards the original scheme; trust it so Django
+# knows the request was HTTPS (needed for secure cookies inside the proxy).
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# Comma-separated allowlist for state-changing requests behind the proxy.
+CSRF_TRUSTED_ORIGINS = [o for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o]
 
 # ── DRF + JWT ────────────────────────────────────────────────────────────────
 REST_FRAMEWORK = {
@@ -128,6 +145,12 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_PAGINATION_CLASS": None,  # screen payloads are small, curated lists
+    # Per-view throttles via `throttle_scope` on the view. The "auth" scope is
+    # wired onto the email-code endpoints so one client can't brute-force send.
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": "30/hour",
+    },
 }
 
 SIMPLE_JWT = {
@@ -187,3 +210,60 @@ ORCHESTRATOR_SERVICE_TOKEN = os.environ.get("ORCHESTRATOR_SERVICE_TOKEN", "")
 
 # ── Frontend URL (for OAuth redirects) ────────────────────────────────────────
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
+
+# ── Connector provider credentials (P2) ──────────────────────────────────────
+# Every value here comes from the environment — never commit real secrets.
+# A missing key simply leaves that provider unconfigured (poll returns 0).
+GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+GITHUB_REDIRECT_URI = os.environ.get("GITHUB_REDIRECT_URI", "")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_WORKSPACE_ADMIN = os.environ.get("GOOGLE_WORKSPACE_ADMIN", "")
+AWS_ROLE_ARN = os.environ.get("AWS_ROLE_ARN", "")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+# Webhook secret is SEPARATE from the key secret and differs per mode (test/live).
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+# GST invoicing (seller identity). Seller state decides CGST+SGST vs IGST.
+GST_SELLER_GSTIN = os.environ.get("GST_SELLER_GSTIN", "")
+GST_SELLER_STATE = os.environ.get("GST_SELLER_STATE", "")
+
+# ── Startup verification (P4) ────────────────────────────────────────────────
+# Require company-domain email at signup (blocks gmail creating an org).
+# Set REQUIRE_BUSINESS_EMAIL=0 for local demos. Domain DNS check is on by
+# default; disable in offline test envs with VERIFICATION_DNS_ENABLED=0.
+REQUIRE_BUSINESS_EMAIL = os.environ.get("REQUIRE_BUSINESS_EMAIL", "1") == "1"
+VERIFICATION_DNS_ENABLED = os.environ.get("VERIFICATION_DNS_ENABLED", "1") == "1"
+# Optional GSTIN vendor lookup (Surepass/Karza). Empty => checksum-only.
+GSTIN_API_KEY = os.environ.get("GSTIN_API_KEY", "")
+GSTIN_API_URL = os.environ.get("GSTIN_API_URL", "")
+
+# ── Orchestrator hand-off ────────────────────────────────────────────────────
+# When ORCHESTRATOR_ENABLED is false ingestion skips the Redis publish that
+# wakes the LangGraph worker. ORCHESTRATOR_STREAM is the pub/sub channel the
+# orchestrator's `worker` mode subscribes to (must match on both sides).
+ORCHESTRATOR_ENABLED = os.environ.get("ORCHESTRATOR_ENABLED", "1")
+ORCHESTRATOR_STREAM = os.environ.get("ORCHESTRATOR_STREAM", "viltrumx:events")
+ORCHESTRATOR_TENANT_SLUG = os.environ.get("ORCHESTRATOR_TENANT_SLUG", "")
+# The tenant's home country — events resolving outside it count as foreign for
+# impossible-travel / geo-mismatch detection. Default India.
+TENANT_HOME_COUNTRY = os.environ.get("TENANT_HOME_COUNTRY", "IN")
+
+# ── Celery beat schedule ─────────────────────────────────────────────────────
+# Periodic jobs, all timezone-aware via TIME_ZONE (Asia/Kolkata).
+CELERY_BEAT_SCHEDULE = {
+    "poll-all-connectors": {
+        "task": "connectors.tasks.poll_all_connectors",
+        "schedule": crontab(minute="*/5"),
+    },
+    "sweep-auto-rollbacks": {
+        "task": "actions.tasks.sweep_auto_rollbacks",
+        "schedule": crontab(minute="*"),
+    },
+    "nightly-readiness": {
+        "task": "reports.tasks.nightly_readiness",
+        "schedule": crontab(hour=2, minute=30),
+    },
+}

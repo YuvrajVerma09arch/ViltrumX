@@ -1,0 +1,21 @@
+# Production override — layered on top of the base stack.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS are NOT set here; they must come from
+# the deployment's .env (or the platform secrets manager), e.g.:
+#   ALLOWED_HOSTS=app.yourdomain,api.yourdomain
+#   CSRF_TRUSTED_ORIGINS=https://app.yourdomain
+
+services:
+  backend:
+    environment:
+      DJANGO_SETTINGS_MODULE: viltrumx.settings.prod
+
+  celery:
+    environment:
+      DJANGO_SETTINGS_MODULE: viltrumx.settings.prod
+
+  celery-beat:
+    environment:
+      DJANGO_SETTINGS_MODULE: viltrumx.settings.prod

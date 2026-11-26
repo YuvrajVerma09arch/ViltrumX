@@ -1,10 +1,18 @@
+import logging
 import os
 from datetime import timedelta
 
 from .staging import *  # noqa: F403
 
+logger = logging.getLogger(__name__)
+
 # prod = staging hardening plus strict transport + short-lived tokens
-ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "").split(",")
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("ALLOWED_HOSTS", "").split(",") if h.strip()]
+if not ALLOWED_HOSTS:
+    # Fail open to localhost rather than crash boot — but make the misconfig
+    # loud so it shows up in container logs before a deploy reaches traffic.
+    logger.warning("ALLOWED_HOSTS is empty; falling back to ['localhost']")
+    ALLOWED_HOSTS = ["localhost"]
 
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True

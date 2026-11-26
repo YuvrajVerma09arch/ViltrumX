@@ -7,3 +7,7 @@ DEBUG = False
 ALLOWED_HOSTS = ["testserver"]
 CELERY_TASK_ALWAYS_EAGER = True
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]  # noqa: S105 — fast test hashing
+
+# Test env: allow any email domain and skip live DNS checks.
+REQUIRE_BUSINESS_EMAIL = False
+VERIFICATION_DNS_ENABLED = False
